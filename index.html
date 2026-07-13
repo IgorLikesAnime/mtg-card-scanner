@@ -37,7 +37,10 @@
     .stage { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
     video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .overlay { position: absolute; inset: 0; pointer-events: none; }
-    .guide { position: absolute; border: 2px dashed rgba(255,255,255,.55); border-radius: 10px;
+    /* Only top/bottom framing lines — no left/right, so it doesn't imply a fixed
+       card width and you can get in close. OCR is driven by the yellow band. */
+    .guide { position: absolute; border-top: 2px dashed rgba(255,255,255,.5);
+             border-bottom: 2px dashed rgba(255,255,255,.5);
              left: 22%; top: 6%; width: 56%; height: 88%; }
     .titleband { position: absolute; left: 22%; top: 6%; width: 56%; height: 10.6%;
                  border: 2px solid #ffd43b; border-radius: 8px 8px 0 0; background: rgba(255,212,59,.10); }
@@ -82,7 +85,7 @@
         <div class="overlay" id="overlay">
           <div class="guide"></div>
           <div class="titleband"></div>
-          <div class="hint">Fit card in the dashed box · name inside the yellow band</div>
+          <div class="hint">Get in close — fill the yellow band with the card's name</div>
         </div>
       </div>
       <div class="row" style="margin-top:10px">
