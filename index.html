@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MTG Card Scanner</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0f1115; color: #e6e8ee; line-height: 1.45;
+    }
+    header { padding: 14px 18px; border-bottom: 1px solid #232838; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; font-size: 13px; color: #9aa2b5; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px; max-width: 1200px; }
+    @media (max-width: 860px) {
+      main { grid-template-columns: 1fr; }
+      /* Magic cards are portrait — match the stage + guide to the card shape so
+         it fills the phone's rear camera frame at full resolution. */
+      .stage { aspect-ratio: 3/4; }
+      .guide { left: 7%; top: 4%; width: 86%; height: 92%; }
+      .titleband { left: 7%; top: 4%; width: 86%; height: 8.4%; }
+    }
+    .card { background: #161a24; border: 1px solid #232838; border-radius: 10px; padding: 14px; }
+    .card h2 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: #9aa2b5; }
+    button {
+      background: #3b5bdb; color: #fff; border: 0; border-radius: 7px;
+      padding: 9px 14px; font-size: 14px; cursor: pointer; font-weight: 600;
+    }
+    button.secondary { background: #2a2f3d; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    /* Video + alignment overlay */
+    .stage { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
+    video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .overlay { position: absolute; inset: 0; pointer-events: none; }
+    .guide { position: absolute; border: 2px dashed rgba(255,255,255,.55); border-radius: 10px;
+             left: 22%; top: 6%; width: 56%; height: 88%; }
+    .titleband { position: absolute; left: 22%; top: 6%; width: 56%; height: 10.6%;
+                 border: 2px solid #ffd43b; border-radius: 8px 8px 0 0; background: rgba(255,212,59,.10); }
+    .hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px; color: #ffd43b; text-shadow: 0 1px 2px #000; }
+    #status { font-size: 13px; color: #9aa2b5; min-height: 18px; margin-top: 8px; }
+    /* Candidate */
+    #candidate { display: none; gap: 12px; margin-top: 12px; }
+    #candidate img { width: 96px; border-radius: 6px; background: #000; }
+    #candidate .meta { flex: 1; min-width: 0; }
+    #candidate .meta .name { font-weight: 700; font-size: 15px; }
+    #candidate .meta .sub { color: #9aa2b5; font-size: 13px; }
+    input[type=text], input[type=number] {
+      background: #0f1115; border: 1px solid #2a2f3d; color: #e6e8ee; border-radius: 6px; padding: 7px 9px; font-size: 14px;
+    }
+    input[type=number] { width: 64px; }
+    label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+    /* List */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232838; }
+    th { color: #9aa2b5; font-weight: 600; }
+    td.num, th.num { text-align: right; }
+    .remove { background: #442; color: #f8b4b4; padding: 3px 8px; font-size: 12px; }
+    .empty { color: #6b7280; font-size: 13px; padding: 8px 0; }
+    .exports { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .exports button { background: #2f9e44; }
+    a.dl { display: none; }
+    code { background: #0f1115; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🃏 MTG Card Scanner</h1>
+    <p>Point your webcam at a Magic card, align it in the box, and Capture. Confirm the match, then export for your tracking site.</p>
+  </header>
+
+  <main>
+    <!-- LEFT: camera + recognition -->
+    <section class="card">
+      <h2>Scan</h2>
+      <div class="stage">
+        <video id="video" playsinline muted></video>
+        <div class="overlay" id="overlay">
+          <div class="guide"></div>
+          <div class="titleband"></div>
+          <div class="hint">Fit card in the dashed box · name inside the yellow band</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="startBtn">Start camera</button>
+        <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; identify</button>
+      </div>
+      <div id="status">Camera not started.</div>
+      <canvas id="ocrPreview" title="What OCR sees" style="display:none; margin-top:8px; width:100%; max-width:340px; image-rendering:pixelated; border:1px solid #2a2f3d; border-radius:6px; background:#000;"></canvas>
+
+      <div id="candidate">
+        <img id="candImg" alt="" />
+        <div class="meta">
+          <div class="name" id="candName">—</div>
+          <div class="sub" id="candSub">—</div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="searchInput" placeholder="Card name (edit &amp; re-search)" style="flex:1" />
+            <button id="searchBtn" class="secondary">Search</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="chk"><input type="checkbox" id="foilChk" /> Foil</label>
+            <label class="chk">Qty <input type="number" id="qtyInput" value="1" min="1" /></label>
+            <button id="addBtn" disabled>➕ Add to list</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- hidden work canvases -->
+      <canvas id="frameCanvas" style="display:none"></canvas>
+      <canvas id="ocrCanvas" style="display:none"></canvas>
+    </section>
+
+    <!-- RIGHT: collected list + export -->
+    <section class="card">
+      <h2>Scanned cards (<span id="count">0</span>)</h2>
+      <div id="listWrap">
+        <div class="empty" id="emptyMsg">No cards yet — scan one to get started.</div>
+        <table id="table" style="display:none">
+          <thead>
+            <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Foil</th><th></th></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="exports">
+        <button data-fmt="manabox">ManaBox CSV</button>
+        <button data-fmt="moxfield">Moxfield CSV</button>
+        <button data-fmt="archidekt">Archidekt CSV</button>
+        <button data-fmt="deckbox">Deckbox CSV</button>
+        <button data-fmt="scryfall">Scryfall JSON</button>
+      </div>
+      <a id="dl" class="dl"></a>
+      <p style="font-size:12px;color:#6b7280;margin:12px 0 0">
+        Recognition uses <code>Tesseract.js</code> OCR + the <code>Scryfall</code> API. Matches default to the most recent printing — edit the name and re-search if the set is wrong.
+      </p>
+    </section>
+  </main>
+
+  <!-- Tesseract.js OCR engine (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
