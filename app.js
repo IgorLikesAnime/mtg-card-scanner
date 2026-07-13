@@ -56,6 +56,24 @@ async function reduceExposure(stream) {
   } catch { /* unsupported — software adaptive threshold handles the rest */ }
 }
 
+// ---- mode toggle: identify by name (title) or by set code + collector number ----
+let mode = "name";
+function setMode(m) {
+  mode = m;
+  $("overlay").classList.toggle("mode-code", m === "code");
+  $("modeName").classList.toggle("active", m === "name");
+  $("modeCode").classList.toggle("active", m === "code");
+  $("hint").textContent = m === "code"
+    ? "Aim at the card's bottom-left set/№ line and fill the blue box"
+    : "Get in close — fill the yellow band with the card's name";
+  $("captureBtn").textContent = m === "code" ? "📸 Capture set / №" : "📸 Capture & identify";
+  $("searchInput").placeholder = m === "code" ? "Set code, №, lang (e.g. NEO 100 ja)" : "Card name (edit & re-search)";
+  $("candidate").style.display = "none";
+  $("suggestions").style.display = "none";
+}
+$("modeName").addEventListener("click", () => setMode("name"));
+$("modeCode").addEventListener("click", () => setMode("code"));
+
 // ---- capture + OCR ----
 $("captureBtn").addEventListener("click", async () => {
   const vw = video.videoWidth, vh = video.videoHeight;
@@ -65,14 +83,13 @@ $("captureBtn").addEventListener("click", async () => {
   frameCanvas.width = vw; frameCanvas.height = vh;
   frameCanvas.getContext("2d").drawImage(video, 0, 0, vw, vh);
 
-  // Measure the yellow title-band element relative to the stage, so the OCR
-  // crop always matches exactly what the user sees — in any layout (desktop
-  // landscape or phone portrait). Then map those fractions back to source
-  // pixels, accounting for object-fit: cover's scale/crop (needed whenever the
-  // camera's aspect ratio differs from the stage, e.g. 16:9 webcam, phone cam).
+  // Measure the active capture box (title band, or the set/№ box) relative to
+  // the stage so the OCR crop always matches what the user sees — in any layout.
+  // Then map those fractions back to source pixels, accounting for object-fit:
+  // cover's scale/crop (needed when the camera's aspect ratio differs).
   const stage = document.querySelector(".stage");
   const sRect = stage.getBoundingClientRect();
-  const bRect = document.querySelector(".titleband").getBoundingClientRect();
+  const bRect = document.querySelector(mode === "code" ? ".numberband" : ".titleband").getBoundingClientRect();
   const fx = (bRect.left - sRect.left) / sRect.width;
   const fy = (bRect.top - sRect.top) / sRect.height;
   const fw = bRect.width / sRect.width;
@@ -84,9 +101,10 @@ $("captureBtn").addEventListener("click", async () => {
   if (vidAR >= stageAR) { visW = stageAR / vidAR; cropX = (1 - visW) / 2; }
   else { visH = vidAR / stageAR; cropY = (1 - visH) / 2; }
 
-  // crop the title band and upscale for OCR, trimming the edges that inject junk
-  // glyphs: the left card border (reads as "I"/"|") and the right mana cost.
-  const inL = 0.03, inR = 0.15;
+  // In name mode, trim band edges that inject junk glyphs: left card border
+  // (reads as "I"/"|") and right mana cost. The set/№ box uses its full area.
+  const inL = mode === "code" ? 0 : 0.03;
+  const inR = mode === "code" ? 0 : 0.15;
   const sx = Math.round((cropX + (fx + fw * inL) * visW) * vw);
   const sy = Math.round((cropY + fy * visH) * vh);
   const sw = Math.round(fw * (1 - inL - inR) * visW * vw);
@@ -96,7 +114,9 @@ $("captureBtn").addEventListener("click", async () => {
   const octx = ocrCanvas.getContext("2d");
   octx.imageSmoothingEnabled = true;
   octx.drawImage(frameCanvas, sx, sy, sw, sh, 0, 0, ocrCanvas.width, ocrCanvas.height);
-  preprocessForOCR(octx, ocrCanvas.width, ocrCanvas.height);
+  // set/№ text can be light-on-dark (black-bordered cards), so use polarity-aware
+  // binarization there; the title band is dark-on-light -> adaptive threshold.
+  (mode === "code" ? preprocessBlock : preprocessForOCR)(octx, ocrCanvas.width, ocrCanvas.height);
 
   // show the user exactly what the OCR sees (makes alignment issues obvious)
   const prev = $("ocrPreview");
@@ -104,16 +124,13 @@ $("captureBtn").addEventListener("click", async () => {
   prev.getContext("2d").drawImage(ocrCanvas, 0, 0);
   prev.style.display = "block";
 
-  setStatus("Reading card name (OCR)…");
+  setStatus(mode === "code" ? "Reading set / number…" : "Reading card name (OCR)…");
   $("captureBtn").disabled = true;
   try {
-    const worker = await getWorker();
+    const worker = await getWorker(mode);
     const { data } = await worker.recognize(ocrCanvas);
-    const cleaned = cleanName(data.text || "");
-    $("searchInput").value = cleaned;
-    if (cleaned.length < 2) { setStatus("Couldn't read a name — type it in and press Search."); showCandidate(null); return; }
-    setStatus('OCR read: "' + cleaned + '" — matching…');
-    await searchScryfall(cleaned);
+    if (mode === "code") await identifyByCode(data.text || "");
+    else await identifyByName(data.text || "");
   } catch (err) {
     setStatus("OCR failed: " + err.message);
   } finally {
@@ -121,18 +138,26 @@ $("captureBtn").addEventListener("click", async () => {
   }
 });
 
-// Reusable Tesseract worker: restricts output to name characters (no digits/
-// symbols) and treats the crop as one text line. Created once, reused per scan.
-let ocrWorker = null;
-async function getWorker() {
-  if (ocrWorker) return ocrWorker;
-  ocrWorker = await Tesseract.createWorker("eng");
-  await ocrWorker.setParameters({
-    tessedit_pageseg_mode: "7", // single text line
-    tessedit_char_whitelist:
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',-",
-  });
-  return ocrWorker;
+async function identifyByName(text) {
+  const cleaned = cleanName(text);
+  $("searchInput").value = cleaned;
+  if (cleaned.length < 2) { setStatus("Couldn't read a name — type it in and press Search."); showCandidate(null); return; }
+  setStatus('OCR read: "' + cleaned + '" — matching…');
+  await searchScryfall(cleaned);
+}
+
+// Tesseract workers — one per mode (different page-seg + character whitelist),
+// created once and reused. Name mode: single line of letters. Code mode: a
+// small multi-line block of digits + uppercase letters + the "/" separator.
+const ocrWorkers = {};
+async function getWorker(m) {
+  if (ocrWorkers[m]) return ocrWorkers[m];
+  const w = await Tesseract.createWorker("eng");
+  await w.setParameters(m === "code"
+    ? { tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/ " }
+    : { tessedit_pageseg_mode: "7", tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',-" });
+  ocrWorkers[m] = w;
+  return w;
 }
 
 // Adaptive (local-mean) thresholding via an integral image. Each pixel is
@@ -172,6 +197,41 @@ function preprocessForOCR(ctx, w, h) {
       const idx = p * 4;
       d[idx] = d[idx + 1] = d[idx + 2] = v;
     }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// Global Otsu binarization with automatic polarity: the minority pixel class is
+// treated as ink and rendered black-on-white. Handles the set/№ line whether it
+// is dark-on-light (white-bordered cards) or light-on-dark (black-bordered).
+function preprocessBlock(ctx, w, h) {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const n = w * h;
+  const gray = new Uint8Array(n);
+  const hist = new Uint32Array(256);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const g = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+    gray[p] = g; hist[g]++;
+  }
+  let sum = 0;
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, maxVar = 0, thr = 127;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (wB === 0) continue;
+    const wF = n - wB; if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > maxVar) { maxVar = between; thr = t; }
+  }
+  let below = 0;
+  for (let p = 0; p < n; p++) if (gray[p] <= thr) below++;
+  const textIsDark = below <= n - below; // fewer dark pixels => dark is the ink
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const isText = (gray[p] <= thr) === textIsDark;
+    const v = isText ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -248,10 +308,59 @@ async function fetchExact(name) {
   return r.ok ? r.json() : null;
 }
 
+// ---- identify by set code + collector number (language-independent) ----
+// The set code and collector number are printed identically in every language,
+// so reading them pins the exact printing in EN/JP/FR/DE/IT/ES via one API call.
+
+function parseSetNumber(text) {
+  const t = text.toUpperCase().replace(/[|]/g, "/");
+  const tokens = t.split(/[^A-Z0-9]+/).filter(Boolean);
+  // collector number: digits before a "/" (e.g. 0123/274), else first number
+  let num = null;
+  const slash = t.match(/(\d{1,5})\s*\/\s*\d{1,5}/);
+  if (slash) num = slash[1];
+  else { const n = tokens.find((tk) => /^\d{1,5}$/.test(tk)); if (n) num = n; }
+  if (num) num = num.replace(/^0+(?=\d)/, ""); // strip leading zeros
+  // set code: first 3-4 char token that contains a letter (skips 274, rarity R)
+  const set = tokens.find((tk) => /^[A-Z0-9]{3,4}$/.test(tk) && /[A-Z]/.test(tk));
+  // language code as printed on the card -> Scryfall lang
+  const langMap = { EN: "en", JP: "ja", JA: "ja", FR: "fr", DE: "de", IT: "it",
+    ES: "es", SP: "es", PT: "pt", RU: "ru", KO: "ko", CS: "zhs", CT: "zht" };
+  let lang = null;
+  for (const tk of tokens) { if (langMap[tk]) { lang = langMap[tk]; break; } }
+  return { set, num, lang };
+}
+
+async function lookupBySetNumber(set, num, lang) {
+  const base = `${SCRYFALL}/cards/${encodeURIComponent(set.toLowerCase())}/${encodeURIComponent(num)}`;
+  try {
+    let r = await fetch(lang ? `${base}/${lang}` : base);
+    if (r.ok) return r.json();
+    if (lang) { r = await fetch(base); if (r.ok) return r.json(); } // fall back to any language
+  } catch { /* network */ }
+  return null;
+}
+
+async function identifyByCode(text) {
+  const { set, num, lang } = parseSetNumber(text);
+  $("searchInput").value = [set, num, lang].filter(Boolean).join(" ");
+  renderSuggestions([]);
+  if (!set || !num) {
+    showCandidate(null);
+    setStatus(`Couldn't read set/№ (set="${set || "?"}", №="${num || "?"}"). Get closer, or edit the field and Search.`);
+    return;
+  }
+  setStatus(`Read ${set.toUpperCase()} #${num}${lang ? " (" + lang + ")" : ""} — looking up…`);
+  const card = await lookupBySetNumber(set, num, lang);
+  if (card) { showCandidate(card); setStatus(`Found ${card.printed_name || card.name} — ${set.toUpperCase()} #${num}. Confirm below.`); }
+  else { showCandidate(null); setStatus(`No card for ${set.toUpperCase()} #${num}${lang ? "/" + lang : ""}. Edit the field and Search, or try Name mode.`); }
+}
+
 // ---- lookup ----
 $("searchBtn").addEventListener("click", () => {
   const q = $("searchInput").value.trim();
-  if (q) searchScryfall(q);
+  if (!q) return;
+  if (mode === "code") identifyByCode(q); else searchScryfall(q);
 });
 
 async function searchScryfall(query) {
@@ -315,8 +424,11 @@ function showCandidate(card) {
   const img = card.image_uris?.small
     || card.card_faces?.[0]?.image_uris?.small || "";
   $("candImg").src = img;
-  $("candName").textContent = card.name;
-  $("candSub").textContent = `${card.set_name} (${(card.set || "").toUpperCase()}) · #${card.collector_number} · ${card.rarity}`;
+  // show the localized printed name (if any) alongside the English name
+  $("candName").textContent = (card.printed_name && card.printed_name !== card.name)
+    ? `${card.printed_name} · ${card.name}` : card.name;
+  const langTag = card.lang && card.lang !== "en" ? " · " + card.lang.toUpperCase() : "";
+  $("candSub").textContent = `${card.set_name} (${(card.set || "").toUpperCase()}) · #${card.collector_number} · ${card.rarity}${langTag}`;
   $("foilChk").checked = false;
   $("qtyInput").value = 1;
   $("addBtn").disabled = false;

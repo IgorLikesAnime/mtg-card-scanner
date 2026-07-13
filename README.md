@@ -68,6 +68,21 @@ lookups, exports) still runs entirely in your phone's browser.
 5. Set **Foil** / **Qty**, then **Add to list**.
 6. When done, click an **export** button.
 
+## Two ways to identify a card
+
+Use the **Identify by** toggle above the camera:
+
+- **Name** (default) — OCRs the title and fuzzy-matches the English name catalog.
+  Works on cards of any age, but defaults to the *most recent* printing and only
+  reads English titles.
+- **Set + №** — aim at the card's **bottom-left** corner and fill the blue box with
+  the `123/274 · SET · LANG` line. The set code and collector number are printed the
+  same in every language, so this pins the **exact printing** and works for
+  **English, Japanese, French, Italian, German, and Spanish** cards alike. Only
+  cards from ~2015 onward (the M15 frame) print this line — older cards use Name mode.
+
+Either way you can correct a misread in the input field and press **Search**.
+
 ## Export formats
 
 | Button          | File                        | Imports into            |

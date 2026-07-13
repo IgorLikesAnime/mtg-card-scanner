@@ -44,7 +44,16 @@
              left: 22%; top: 6%; width: 56%; height: 88%; }
     .titleband { position: absolute; left: 22%; top: 6%; width: 56%; height: 10.6%;
                  border: 2px solid #ffd43b; border-radius: 8px 8px 0 0; background: rgba(255,212,59,.10); }
+    /* Set + collector-number capture box (shown only in "Set + №" mode). Centered
+       and framing-independent — aim at the card's bottom-left corner and fill it. */
+    .numberband { position: absolute; left: 12%; top: 38%; width: 76%; height: 24%; display: none;
+                  border: 2px solid #4dd4ff; border-radius: 8px; background: rgba(77,212,255,.08); }
+    .overlay.mode-code .guide, .overlay.mode-code .titleband { display: none; }
+    .overlay.mode-code .numberband { display: block; }
     .hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px; color: #ffd43b; text-shadow: 0 1px 2px #000; }
+    .overlay.mode-code .hint { color: #4dd4ff; }
+    .modebtn { background: #2a2f3d; font-size: 13px; padding: 6px 12px; }
+    .modebtn.active { background: #3b5bdb; }
     #status { font-size: 13px; color: #9aa2b5; min-height: 18px; margin-top: 8px; }
     /* Candidate */
     #candidate { display: none; gap: 12px; margin-top: 12px; }
@@ -85,10 +94,16 @@
         <div class="overlay" id="overlay">
           <div class="guide"></div>
           <div class="titleband"></div>
-          <div class="hint">Get in close — fill the yellow band with the card's name</div>
+          <div class="numberband"></div>
+          <div class="hint" id="hint">Get in close — fill the yellow band with the card's name</div>
         </div>
       </div>
       <div class="row" style="margin-top:10px">
+        <span style="font-size:13px;color:#9aa2b5">Identify by:</span>
+        <button id="modeName" class="modebtn active">Name</button>
+        <button id="modeCode" class="modebtn">Set + №</button>
+      </div>
+      <div class="row" style="margin-top:8px">
         <button id="startBtn">Start camera</button>
         <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; identify</button>
       </div>
