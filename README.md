@@ -1,12 +1,22 @@
 # 🃏 MTG Card Scanner
 
-Point your webcam at a Magic: The Gathering card, read its name with OCR, confirm
-the match against the [Scryfall](https://scryfall.com) database, and export your
-scans in a format your card‑tracking site can import.
+Pick the set you're scanning, point your camera at each card's **artwork**, and the
+app identifies it by **image** — the same perceptual-hash approach that Delver Lens
+and ManaBox use — then exports your scans for your card-tracking site.
 
-This is a **minimal, browser‑based prototype**. It runs entirely in your browser —
-the only external calls are to Scryfall (card data) and the Tesseract.js CDN (the
-OCR engine).
+Runs entirely in your browser; the only external calls are to
+[Scryfall](https://scryfall.com) for card data and images.
+
+## Why image matching, not OCR?
+
+Earlier versions read the card's title with OCR (Tesseract). Magic's stylized
+display font, through a phone camera, is right at the edge of what OCR can do, so it
+misread names and couldn't handle other languages. Real scanner apps don't OCR —
+they compare a **fingerprint of the card's picture** (a perceptual hash) against a
+database of known cards. That's font-proof and **language-independent** (a Japanese
+card has the same art as the English one). To keep it accurate and fast, matching is
+**scoped to one set at a time** ("set-locking", like Delver Lens) — ~300 candidates
+instead of 90,000.
 
 ## Why a web app (and not native Python + OpenCV)?
 
@@ -53,37 +63,32 @@ files on GitHub Pages:
 4. Open that URL in **iPhone Safari**, tap **Start camera**, and **Allow**. Use
    *Add to Home Screen* for an app‑like icon.
 
-Nothing runs on your PC — GitHub serves the page. Everything else (OCR, Scryfall
-lookups, exports) still runs entirely in your phone's browser.
+Nothing runs on your PC — GitHub serves the page. Everything else (matching,
+Scryfall calls, exports) runs entirely in your phone's browser.
 
 ## How to use
 
-1. **Start camera** → grant access.
-2. Hold a card so it fills the dashed box, with the **title inside the yellow band**.
-   Good, even lighting and a steady hand make OCR far more reliable.
-3. **Capture & identify** → the app OCRs the title band and shows the best Scryfall
-   match with its image, set, and collector number.
-4. If OCR misread it, **edit the name field and press Search**, or tap one of the
-   suggested alternatives. To get the **exact printing**, use the **printing
-   dropdown** under the card — it lists every set that card appeared in, so name
-   detection is no longer stuck on the newest printing.
-5. Set **Foil** / **Qty**, then **Add to list**.
+1. **Load a set** — type the set name or code (e.g. `Return to Ravnica` or `rtr`) and
+   press **Load set**. The first time, it downloads and fingerprints that set's
+   ~300 artworks (a progress bar shows it); after that the set is cached and instant.
+2. **Start camera** → grant access.
+3. Line the card's **artwork** up inside the blue box and **Capture & match**. It
+   compares your shot to the set and shows the closest card with a confidence %.
+4. If it's wrong, **tap one of the alternative names**, or type the name in the
+   **Search by name** box (fuzzy-matched within the loaded set).
+5. Set **Lang** (for non-English copies — the art is identical across languages),
+   **Foil**, **Qty**, then **Add to list**.
 6. When done, click an **export** button.
 
-## Two ways to identify a card
+Because you tell it the set, the **exact printing** (set + collector number) is
+always correct — no printing guesswork.
 
-Use the **Identify by** toggle above the camera:
+## Tips for good matches
 
-- **Name** (default) — OCRs the title and fuzzy-matches the English name catalog.
-  Works on cards of any age, but defaults to the *most recent* printing and only
-  reads English titles.
-- **Set + №** — aim at the card's **bottom-left** corner and fill the blue box with
-  the `123/274 · SET · LANG` line. The set code and collector number are printed the
-  same in every language, so this pins the **exact printing** and works for
-  **English, Japanese, French, Italian, German, and Spanish** cards alike. Only
-  cards from ~2015 onward (the M15 frame) print this line — older cards use Name mode.
-
-Either way you can correct a misread in the input field and press **Search**.
+- Fill the blue box with just the **artwork**, reasonably square-on and in focus.
+- Even lighting; avoid glare on the art.
+- Set-locking is what makes it accurate — always load the right set first. To scan a
+  mixed pile, group by set.
 
 ## Export formats
 
@@ -100,22 +105,31 @@ where the format supports it, so imports resolve to the exact printing.
 
 ## Files
 
-- `index.html` — UI, camera view, and the card‑alignment overlay.
-- `app.js` — capture → OCR (Tesseract.js) → Scryfall lookup → list → export.
-- `serve.py` — zero‑dependency localhost server (opens the browser for you).
+- `index.html` — UI: set picker, camera view, art guide box, result, list, export.
+- `app.js` — set fetch + artwork hashing (dHash+aHash), capture → match → export.
+- `serve.py` — zero‑dependency localhost server for local dev (opens the browser).
 
-## Known limitations (it's a prototype)
+## How the matching works
 
-- OCR reads only the **card name**; the printing defaults to the most recent one
-  Scryfall returns. Use **edit + Search** to pin an older set.
-- One card at a time; no batch/rapid‑fire scanning.
-- No persistence — the scan list is in memory and clears on page reload. Export
-  before you close the tab.
-- Needs internet (Scryfall API + Tesseract.js CDN) and decent lighting.
+Each card's Scryfall `art_crop` image is reduced to a 128‑bit perceptual hash
+(64‑bit difference hash + 64‑bit average hash). Your captured artwork gets the same
+hash, and the card with the smallest **Hamming distance** within the loaded set
+wins. Hashes are cached per set in `localStorage`, so a set is fingerprinted once.
+
+## Known limitations
+
+- **You pick the set** — matching is scoped to it (that's what makes it accurate).
+  A random mixed pile means switching sets; group by set for speed.
+- Needs a reasonably **square-on, in-focus** shot of the artwork; heavy glare or
+  extreme angles hurt matching.
+- Language is inferred from the **Lang** selector, not the card (art can't tell them
+  apart) — set it for non-English copies.
+- No persistence — the scan list clears on reload. Export before closing.
+- Needs internet (Scryfall API + card images).
 
 ## Ideas to extend
 
-- Set‑symbol detection to auto‑pick the correct printing.
-- Perceptual‑hash image matching against Scryfall bulk art for hands‑free scanning.
-- `localStorage` persistence and an editable quantity column.
-- A "scan another" hotkey for fast bulk entry.
+- Auto card-detection + perspective correction (OpenCV.js) for hands-free scanning.
+- A larger/rotation-robust hash, or art + full-card hashes combined.
+- `localStorage` persistence of the scan list; a "scan another" hotkey for speed.
+- Optional global (no set-lock) mode from a prebuilt hash database.

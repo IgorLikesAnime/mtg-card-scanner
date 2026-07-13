@@ -7,53 +7,38 @@
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    body {
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: #0f1115; color: #e6e8ee; line-height: 1.45;
-    }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           background: #0f1115; color: #e6e8ee; line-height: 1.45; }
     header { padding: 14px 18px; border-bottom: 1px solid #232838; }
     header h1 { margin: 0; font-size: 18px; }
     header p { margin: 4px 0 0; font-size: 13px; color: #9aa2b5; }
     main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px; max-width: 1200px; }
-    @media (max-width: 860px) {
-      main { grid-template-columns: 1fr; }
-      /* Magic cards are portrait — match the stage + guide to the card shape so
-         it fills the phone's rear camera frame at full resolution. */
-      .stage { aspect-ratio: 3/4; }
-      .guide { left: 7%; top: 4%; width: 86%; height: 92%; }
-      .titleband { left: 7%; top: 4%; width: 86%; height: 8.4%; }
-    }
+    @media (max-width: 860px) { main { grid-template-columns: 1fr; } .stage { aspect-ratio: 3/4; } }
     .card { background: #161a24; border: 1px solid #232838; border-radius: 10px; padding: 14px; }
     .card h2 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: #9aa2b5; }
-    button {
-      background: #3b5bdb; color: #fff; border: 0; border-radius: 7px;
-      padding: 9px 14px; font-size: 14px; cursor: pointer; font-weight: 600;
-    }
+    button { background: #3b5bdb; color: #fff; border: 0; border-radius: 7px; padding: 9px 14px;
+             font-size: 14px; cursor: pointer; font-weight: 600; }
     button.secondary { background: #2a2f3d; }
     button:disabled { opacity: .45; cursor: not-allowed; }
     button:hover:not(:disabled) { filter: brightness(1.08); }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    /* Video + alignment overlay */
+    input[type=text], input[type=number], select {
+      background: #0f1115; border: 1px solid #2a2f3d; color: #e6e8ee; border-radius: 6px;
+      padding: 8px 10px; font-size: 14px; }
+    input[type=number] { width: 64px; }
+    label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+    /* Set picker */
+    #setStatus { font-size: 13px; color: #9aa2b5; margin-top: 6px; min-height: 18px; }
+    .bar { height: 6px; background: #232838; border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+    .bar > div { height: 100%; width: 0; background: #2f9e44; transition: width .15s; }
+    /* Camera + art guide */
     .stage { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
     video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .overlay { position: absolute; inset: 0; pointer-events: none; }
-    /* Only top/bottom framing lines — no left/right, so it doesn't imply a fixed
-       card width and you can get in close. OCR is driven by the yellow band. */
-    .guide { position: absolute; border-top: 2px dashed rgba(255,255,255,.5);
-             border-bottom: 2px dashed rgba(255,255,255,.5);
-             left: 22%; top: 6%; width: 56%; height: 88%; }
-    .titleband { position: absolute; left: 22%; top: 6%; width: 56%; height: 10.6%;
-                 border: 2px solid #ffd43b; border-radius: 8px 8px 0 0; background: rgba(255,212,59,.10); }
-    /* Set + collector-number capture box (shown only in "Set + №" mode). Centered
-       and framing-independent — aim at the card's bottom-left corner and fill it. */
-    .numberband { position: absolute; left: 10%; top: 34%; width: 80%; height: 32%; display: none;
-                  border: 2px solid #4dd4ff; border-radius: 8px; background: rgba(77,212,255,.08); }
-    .overlay.mode-code .guide, .overlay.mode-code .titleband { display: none; }
-    .overlay.mode-code .numberband { display: block; }
-    .hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px; color: #ffd43b; text-shadow: 0 1px 2px #000; }
-    .overlay.mode-code .hint { color: #4dd4ff; }
-    .modebtn { background: #2a2f3d; font-size: 13px; padding: 6px 12px; }
-    .modebtn.active { background: #3b5bdb; }
+    .artbox { position: absolute; left: 8%; top: 22%; width: 84%; aspect-ratio: 1.37;
+              border: 2px solid #4dd4ff; border-radius: 8px; background: rgba(77,212,255,.06); }
+    .hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px;
+            color: #4dd4ff; text-shadow: 0 1px 2px #000; padding: 0 8px; }
     #status { font-size: 13px; color: #9aa2b5; min-height: 18px; margin-top: 8px; }
     /* Candidate */
     #candidate { display: none; gap: 12px; margin-top: 12px; }
@@ -61,11 +46,6 @@
     #candidate .meta { flex: 1; min-width: 0; }
     #candidate .meta .name { font-weight: 700; font-size: 15px; }
     #candidate .meta .sub { color: #9aa2b5; font-size: 13px; }
-    input[type=text], input[type=number] {
-      background: #0f1115; border: 1px solid #2a2f3d; color: #e6e8ee; border-radius: 6px; padding: 7px 9px; font-size: 14px;
-    }
-    input[type=number] { width: 64px; }
-    label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
     /* List */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232838; }
@@ -82,46 +62,61 @@
 <body>
   <header>
     <h1>🃏 MTG Card Scanner</h1>
-    <p>Point your webcam at a Magic card, align it in the box, and Capture. Confirm the match, then export for your tracking site.</p>
+    <p>Pick the set you're scanning, then point your camera at each card's artwork. Cards are matched by image (like Delver Lens) — no OCR, works in any language.</p>
   </header>
 
   <main>
-    <!-- LEFT: camera + recognition -->
+    <!-- LEFT: set + camera + recognition -->
     <section class="card">
       <h2>Scan</h2>
-      <div class="stage">
+
+      <!-- 1. choose the set to scan -->
+      <div class="row">
+        <input type="text" id="setInput" list="setList" placeholder="Type a set name or code…" style="flex:1; min-width:180px" />
+        <datalist id="setList"></datalist>
+        <button id="loadSetBtn" class="secondary">Load set</button>
+      </div>
+      <div id="setStatus">Loading set list…</div>
+      <div class="bar" id="learnBar"><div id="learnFill"></div></div>
+
+      <!-- 2. camera -->
+      <div class="stage" style="margin-top:12px">
         <video id="video" playsinline muted></video>
-        <div class="overlay" id="overlay">
-          <div class="guide"></div>
-          <div class="titleband"></div>
-          <div class="numberband"></div>
-          <div class="hint" id="hint">Get in close — fill the yellow band with the card's name</div>
+        <div class="overlay">
+          <div class="artbox"></div>
+          <div class="hint" id="hint">Fill the blue box with the card's ARTWORK, then Capture</div>
         </div>
       </div>
       <div class="row" style="margin-top:10px">
-        <span style="font-size:13px;color:#9aa2b5">Identify by:</span>
-        <button id="modeName" class="modebtn active">Name</button>
-        <button id="modeCode" class="modebtn">Set + №</button>
-      </div>
-      <div class="row" style="margin-top:8px">
         <button id="startBtn">Start camera</button>
-        <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; identify</button>
+        <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; match</button>
       </div>
-      <div id="status">Camera not started.</div>
-      <canvas id="ocrPreview" title="What OCR sees" style="display:none; margin-top:8px; width:100%; max-width:340px; image-rendering:pixelated; border:1px solid #2a2f3d; border-radius:6px; background:#000;"></canvas>
-      <div id="suggestions" class="row" style="display:none; margin-top:8px"></div>
+      <div id="status">Choose a set to begin.</div>
+      <canvas id="capPreview" title="Captured artwork" style="display:none; margin-top:8px; width:100%; max-width:220px; border:1px solid #2a2f3d; border-radius:6px; background:#000;"></canvas>
 
+      <!-- 3. result -->
       <div id="candidate">
         <img id="candImg" alt="" />
         <div class="meta">
           <div class="name" id="candName">—</div>
           <div class="sub" id="candSub">—</div>
-          <select id="printSelect" title="Choose the exact printing" style="display:none; margin-top:6px; width:100%; background:#0f1115; color:#e6e8ee; border:1px solid #2a2f3d; border-radius:6px; padding:6px 8px; font-size:13px;"></select>
           <div class="row" style="margin-top:8px">
-            <input type="text" id="searchInput" placeholder="Card name (edit &amp; re-search)" style="flex:1" />
+            <input type="text" id="searchInput" placeholder="Wrong? Search by name" style="flex:1" />
             <button id="searchBtn" class="secondary">Search</button>
           </div>
+          <div id="suggestions" class="row" style="display:none; margin-top:8px"></div>
           <div class="row" style="margin-top:8px">
+            <label class="chk">Lang
+              <select id="langSelect">
+                <option value="en" selected>EN</option>
+                <option value="ja">JA</option>
+                <option value="fr">FR</option>
+                <option value="de">DE</option>
+                <option value="it">IT</option>
+                <option value="es">ES</option>
+                <option value="pt">PT</option>
+              </select>
+            </label>
             <label class="chk"><input type="checkbox" id="foilChk" /> Foil</label>
             <label class="chk">Qty <input type="number" id="qtyInput" value="1" min="1" /></label>
             <button id="addBtn" disabled>➕ Add to list</button>
@@ -129,19 +124,17 @@
         </div>
       </div>
 
-      <!-- hidden work canvases -->
       <canvas id="frameCanvas" style="display:none"></canvas>
-      <canvas id="ocrCanvas" style="display:none"></canvas>
     </section>
 
     <!-- RIGHT: collected list + export -->
     <section class="card">
       <h2>Scanned cards (<span id="count">0</span>)</h2>
       <div id="listWrap">
-        <div class="empty" id="emptyMsg">No cards yet — scan one to get started.</div>
+        <div class="empty" id="emptyMsg">No cards yet — load a set and scan one.</div>
         <table id="table" style="display:none">
           <thead>
-            <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Foil</th><th></th></tr>
+            <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Lang</th><th>Foil</th><th></th></tr>
           </thead>
           <tbody id="tbody"></tbody>
         </table>
@@ -155,13 +148,11 @@
       </div>
       <a id="dl" class="dl"></a>
       <p style="font-size:12px;color:#6b7280;margin:12px 0 0">
-        Recognition uses <code>Tesseract.js</code> OCR + the <code>Scryfall</code> API. Matches default to the most recent printing — edit the name and re-search if the set is wrong.
+        Matching uses perceptual hashing of card artwork against the loaded set (data &amp; images from <code>Scryfall</code>). Set the <b>Lang</b> for non‑English copies — the art is identical across languages.
       </p>
     </section>
   </main>
 
-  <!-- Tesseract.js OCR engine (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
