@@ -64,7 +64,7 @@ function setMode(m) {
   $("modeName").classList.toggle("active", m === "name");
   $("modeCode").classList.toggle("active", m === "code");
   $("hint").textContent = m === "code"
-    ? "Aim at the card's bottom-left set/№ line and fill the blue box"
+    ? "Fill the box with the bottom-left block — include the №, set code & language"
     : "Get in close — fill the yellow band with the card's name";
   $("captureBtn").textContent = m === "code" ? "📸 Capture set / №" : "📸 Capture & identify";
   $("searchInput").placeholder = m === "code" ? "Set code, №, lang (e.g. NEO 100 ja)" : "Card name (edit & re-search)";
@@ -283,20 +283,31 @@ function lev(a, b, max) {
   return prev[b.length];
 }
 
-// top-k closest real card names to the (cleaned) query
+// top-k closest real card names to the (cleaned) query. Combines whole-string
+// edit distance with token awareness: an exact name wins outright, names that
+// contain all the query's words are boosted (so a partial read like "Courier"
+// surfaces "Crosstown Courier"), and unrelated long names are filtered out.
 function bestMatches(query, names, k = 6) {
-  const q = query.toLowerCase();
+  const q = query.toLowerCase().trim();
   if (q.length < 2) return [];
+  const qTokens = q.split(" ").filter(Boolean);
   const maxD = Math.max(2, Math.ceil(q.length * 0.5));
   const top = [];
   for (let i = 0; i < names.length; i++) {
-    const n = names[i];
-    if (Math.abs(n.length - q.length) > maxD) continue;
-    const d = lev(q, n.toLowerCase(), maxD);
-    if (d > maxD) continue;
-    const score = d / Math.max(q.length, n.length);
-    if (top.length < k) { top.push({ name: n, score }); top.sort((x, y) => x.score - y.score); }
-    else if (score < top[k - 1].score) { top[k - 1] = { name: n, score }; top.sort((x, y) => x.score - y.score); }
+    const name = names[i];
+    const n = name.toLowerCase();
+    const lenClose = Math.abs(n.length - q.length) <= maxD;
+    const overlap = qTokens.some((t) => t.length >= 3 && n.includes(t));
+    if (!lenClose && !overlap) continue; // prune the bulk of the catalog fast
+    const d = lev(q, n, lenClose ? maxD : Math.max(q.length, n.length));
+    let sim = 1 - d / Math.max(q.length, n.length);
+    if (n === q) sim = 1;
+    else if (qTokens.every((t) => n.split(" ").includes(t))) sim = Math.max(sim, 0.7 + 0.3 * sim);
+    if (sim < 0.35) continue;
+    if (!overlap && sim < 0.7) continue; // drop unrelated long-name filler
+    const score = 1 - sim;
+    if (top.length < k) { top.push({ name, score }); top.sort((a, b) => a.score - b.score); }
+    else if (score < top[k - 1].score) { top[k - 1] = { name, score }; top.sort((a, b) => a.score - b.score); }
   }
   return top;
 }
@@ -312,7 +323,23 @@ async function fetchExact(name) {
 // The set code and collector number are printed identically in every language,
 // so reading them pins the exact printing in EN/JP/FR/DE/IT/ES via one API call.
 
-function parseSetNumber(text) {
+// real set codes, cached — used to validate the OCR'd set token so junk words
+// (THE, OF, COAST from the copyright line) are never mistaken for a set code.
+let SET_CODES = null;
+async function loadSetCodes() {
+  if (SET_CODES) return SET_CODES;
+  try {
+    const cached = localStorage.getItem("scryfall_set_codes_v1");
+    if (cached) { SET_CODES = new Set(JSON.parse(cached)); return SET_CODES; }
+  } catch { /* ignore */ }
+  const data = (await fetch(`${SCRYFALL}/sets`).then((r) => r.json())).data || [];
+  const codes = data.map((s) => s.code.toUpperCase());
+  SET_CODES = new Set(codes);
+  try { localStorage.setItem("scryfall_set_codes_v1", JSON.stringify(codes)); } catch { /* quota */ }
+  return SET_CODES;
+}
+
+function parseSetNumber(text, codes) {
   const t = text.toUpperCase().replace(/[|]/g, "/");
   const tokens = t.split(/[^A-Z0-9]+/).filter(Boolean);
   // collector number: digits before a "/" (e.g. 0123/274), else first number
@@ -321,8 +348,8 @@ function parseSetNumber(text) {
   if (slash) num = slash[1];
   else { const n = tokens.find((tk) => /^\d{1,5}$/.test(tk)); if (n) num = n; }
   if (num) num = num.replace(/^0+(?=\d)/, ""); // strip leading zeros
-  // set code: first 3-4 char token that contains a letter (skips 274, rarity R)
-  const set = tokens.find((tk) => /^[A-Z0-9]{3,4}$/.test(tk) && /[A-Z]/.test(tk));
+  // set code: only accept a token that is an actual Scryfall set code
+  const set = tokens.find((tk) => codes && codes.has(tk)) || null;
   // language code as printed on the card -> Scryfall lang
   const langMap = { EN: "en", JP: "ja", JA: "ja", FR: "fr", DE: "de", IT: "it",
     ES: "es", SP: "es", PT: "pt", RU: "ru", KO: "ko", CS: "zhs", CT: "zht" };
@@ -342,12 +369,13 @@ async function lookupBySetNumber(set, num, lang) {
 }
 
 async function identifyByCode(text) {
-  const { set, num, lang } = parseSetNumber(text);
+  const codes = await loadSetCodes();
+  const { set, num, lang } = parseSetNumber(text, codes);
   $("searchInput").value = [set, num, lang].filter(Boolean).join(" ");
   renderSuggestions([]);
   if (!set || !num) {
     showCandidate(null);
-    setStatus(`Couldn't read set/№ (set="${set || "?"}", №="${num || "?"}"). Get closer, or edit the field and Search.`);
+    setStatus(`Couldn't read set/№ (set="${set || "?"}", №="${num || "?"}"). Include the set-code line, or use Name mode — older cards don't print a set code.`);
     return;
   }
   setStatus(`Read ${set.toUpperCase()} #${num}${lang ? " (" + lang + ")" : ""} — looking up…`);
@@ -410,17 +438,7 @@ function renderSuggestions(list) {
   box.style.display = "flex";
 }
 
-function showCandidate(card) {
-  candidate = card;
-  const box = $("candidate");
-  box.style.display = "flex";
-  if (!card) {
-    $("candImg").removeAttribute("src");
-    $("candName").textContent = "—";
-    $("candSub").textContent = "No confirmed match yet.";
-    $("addBtn").disabled = true;
-    return;
-  }
+function renderCandidateInfo(card) {
   const img = card.image_uris?.small
     || card.card_faces?.[0]?.image_uris?.small || "";
   $("candImg").src = img;
@@ -429,10 +447,53 @@ function showCandidate(card) {
     ? `${card.printed_name} · ${card.name}` : card.name;
   const langTag = card.lang && card.lang !== "en" ? " · " + card.lang.toUpperCase() : "";
   $("candSub").textContent = `${card.set_name} (${(card.set || "").toUpperCase()}) · #${card.collector_number} · ${card.rarity}${langTag}`;
+}
+
+function showCandidate(card) {
+  candidate = card;
+  $("candidate").style.display = "flex";
+  if (!card) {
+    $("candImg").removeAttribute("src");
+    $("candName").textContent = "—";
+    $("candSub").textContent = "No confirmed match yet.";
+    $("printSelect").style.display = "none";
+    $("addBtn").disabled = true;
+    return;
+  }
+  renderCandidateInfo(card);
   $("foilChk").checked = false;
   $("qtyInput").value = 1;
   $("addBtn").disabled = false;
+  loadPrintings(card);
 }
+
+// Populate the printing dropdown so the user can pick the exact set — the
+// reliable way to get the right printing without OCR'ing tiny set codes.
+let currentPrintings = [];
+async function loadPrintings(card) {
+  const sel = $("printSelect");
+  sel.style.display = "none"; sel.innerHTML = ""; currentPrintings = [];
+  // for a non-English match (Set + № mode) the exact printing is already known
+  if (!card.prints_search_uri || (card.lang && card.lang !== "en")) return;
+  try {
+    const data = (await fetch(card.prints_search_uri).then((r) => r.json())).data || [];
+    if (data.length <= 1) return;
+    currentPrintings = data;
+    data.forEach((c, i) => {
+      const o = document.createElement("option");
+      o.value = i;
+      o.textContent = `${c.set_name} (${(c.set || "").toUpperCase()}) · #${c.collector_number} · ${(c.released_at || "").slice(0, 4)}`;
+      if (c.id === card.id) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.style.display = "block";
+  } catch { /* ignore */ }
+}
+
+$("printSelect").addEventListener("change", () => {
+  const c = currentPrintings[+$("printSelect").value];
+  if (c) { candidate = c; renderCandidateInfo(c); }
+});
 
 // ---- collected list ----
 $("addBtn").addEventListener("click", () => {
@@ -552,4 +613,6 @@ function exportAs(fmt) {
 }
 
 renderList();
-loadCardNames().catch(() => {}); // warm the name catalog while the user aligns a card
+// warm the catalogs while the user aligns a card
+loadCardNames().catch(() => {});
+loadSetCodes().catch(() => {});

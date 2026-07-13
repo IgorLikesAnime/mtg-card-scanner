@@ -63,8 +63,10 @@ lookups, exports) still runs entirely in your phone's browser.
    Good, even lighting and a steady hand make OCR far more reliable.
 3. **Capture & identify** → the app OCRs the title band and shows the best Scryfall
    match with its image, set, and collector number.
-4. If the set/printing is wrong or OCR misread it, **edit the name field and press
-   Search** (Scryfall's fuzzy match tolerates typos well).
+4. If OCR misread it, **edit the name field and press Search**, or tap one of the
+   suggested alternatives. To get the **exact printing**, use the **printing
+   dropdown** under the card — it lists every set that card appeared in, so name
+   detection is no longer stuck on the newest printing.
 5. Set **Foil** / **Qty**, then **Add to list**.
 6. When done, click an **export** button.
 

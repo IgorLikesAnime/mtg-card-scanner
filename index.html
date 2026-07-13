@@ -46,7 +46,7 @@
                  border: 2px solid #ffd43b; border-radius: 8px 8px 0 0; background: rgba(255,212,59,.10); }
     /* Set + collector-number capture box (shown only in "Set + №" mode). Centered
        and framing-independent — aim at the card's bottom-left corner and fill it. */
-    .numberband { position: absolute; left: 12%; top: 38%; width: 76%; height: 24%; display: none;
+    .numberband { position: absolute; left: 10%; top: 34%; width: 80%; height: 32%; display: none;
                   border: 2px solid #4dd4ff; border-radius: 8px; background: rgba(77,212,255,.08); }
     .overlay.mode-code .guide, .overlay.mode-code .titleband { display: none; }
     .overlay.mode-code .numberband { display: block; }
@@ -116,6 +116,7 @@
         <div class="meta">
           <div class="name" id="candName">—</div>
           <div class="sub" id="candSub">—</div>
+          <select id="printSelect" title="Choose the exact printing" style="display:none; margin-top:6px; width:100%; background:#0f1115; color:#e6e8ee; border:1px solid #2a2f3d; border-radius:6px; padding:6px 8px; font-size:13px;"></select>
           <div class="row" style="margin-top:8px">
             <input type="text" id="searchInput" placeholder="Card name (edit &amp; re-search)" style="flex:1" />
             <button id="searchBtn" class="secondary">Search</button>
