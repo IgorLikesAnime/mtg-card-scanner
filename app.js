@@ -84,10 +84,12 @@ $("captureBtn").addEventListener("click", async () => {
   if (vidAR >= stageAR) { visW = stageAR / vidAR; cropX = (1 - visW) / 2; }
   else { visH = vidAR / stageAR; cropY = (1 - visH) / 2; }
 
-  // crop the title band (trim right ~15% to skip mana cost) and upscale for OCR
-  const sx = Math.round((cropX + fx * visW) * vw);
+  // crop the title band and upscale for OCR, trimming the edges that inject junk
+  // glyphs: the left card border (reads as "I"/"|") and the right mana cost.
+  const inL = 0.03, inR = 0.15;
+  const sx = Math.round((cropX + (fx + fw * inL) * visW) * vw);
   const sy = Math.round((cropY + fy * visH) * vh);
-  const sw = Math.round(fw * 0.85 * visW * vw);
+  const sw = Math.round(fw * (1 - inL - inR) * visW * vw);
   const sh = Math.round(fh * visH * vh);
   const scale = 4;
   ocrCanvas.width = sw * scale; ocrCanvas.height = sh * scale;
@@ -107,11 +109,11 @@ $("captureBtn").addEventListener("click", async () => {
   try {
     const worker = await getWorker();
     const { data } = await worker.recognize(ocrCanvas);
-    const raw = (data.text || "").replace(/[^A-Za-z',\- ]/g, " ").replace(/\s+/g, " ").trim();
-    $("searchInput").value = raw;
-    if (raw.length < 2) { setStatus("Couldn't read a name — type it in and press Search."); showCandidate(null); return; }
-    setStatus('OCR read: "' + raw + '" — searching Scryfall…');
-    await searchScryfall(raw);
+    const cleaned = cleanName(data.text || "");
+    $("searchInput").value = cleaned;
+    if (cleaned.length < 2) { setStatus("Couldn't read a name — type it in and press Search."); showCandidate(null); return; }
+    setStatus('OCR read: "' + cleaned + '" — matching…');
+    await searchScryfall(cleaned);
   } catch (err) {
     setStatus("OCR failed: " + err.message);
   } finally {
@@ -174,7 +176,79 @@ function preprocessForOCR(ctx, w, h) {
   ctx.putImageData(img, 0, 0);
 }
 
-// ---- Scryfall lookup ----
+// ---- card matching (local fuzzy against the full Scryfall name catalog) ----
+// OCR of Magic's display font is imperfect (Z->L, C->L, stray edge glyphs) and
+// Scryfall's fuzzy endpoint rejects multi-error strings. So we match locally
+// against every card name with an edit distance we control — tolerant of a
+// wrong letter or two — then fetch the exact card for its set/printing details.
+
+let CARD_NAMES = null;
+async function loadCardNames() {
+  if (CARD_NAMES) return CARD_NAMES;
+  try {
+    const cached = localStorage.getItem("scryfall_card_names_v1");
+    if (cached) { CARD_NAMES = JSON.parse(cached); return CARD_NAMES; }
+  } catch { /* ignore */ }
+  const j = await fetch(`${SCRYFALL}/catalog/card-names`).then((r) => r.json());
+  CARD_NAMES = j.data || [];
+  try { localStorage.setItem("scryfall_card_names_v1", JSON.stringify(CARD_NAMES)); } catch { /* quota */ }
+  return CARD_NAMES;
+}
+
+// strip non-letters, then drop lone leading/trailing letters (mana pips, borders)
+function cleanName(text) {
+  const toks = text.replace(/[^A-Za-z',\- ]/g, " ").replace(/\s+/g, " ").trim()
+    .split(" ").filter(Boolean);
+  while (toks.length > 1 && toks[0].length === 1) toks.shift();
+  while (toks.length > 1 && toks[toks.length - 1].length === 1) toks.pop();
+  return toks.join(" ");
+}
+
+// Levenshtein distance with an early-exit cutoff (returns max+1 if exceeded).
+function lev(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = new Array(b.length + 1); cur[0] = i;
+    const ac = a.charCodeAt(i - 1);
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = ac === b.charCodeAt(j - 1) ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      if (cur[j] < best) best = cur[j];
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// top-k closest real card names to the (cleaned) query
+function bestMatches(query, names, k = 6) {
+  const q = query.toLowerCase();
+  if (q.length < 2) return [];
+  const maxD = Math.max(2, Math.ceil(q.length * 0.5));
+  const top = [];
+  for (let i = 0; i < names.length; i++) {
+    const n = names[i];
+    if (Math.abs(n.length - q.length) > maxD) continue;
+    const d = lev(q, n.toLowerCase(), maxD);
+    if (d > maxD) continue;
+    const score = d / Math.max(q.length, n.length);
+    if (top.length < k) { top.push({ name: n, score }); top.sort((x, y) => x.score - y.score); }
+    else if (score < top[k - 1].score) { top[k - 1] = { name: n, score }; top.sort((x, y) => x.score - y.score); }
+  }
+  return top;
+}
+
+async function fetchExact(name) {
+  let r = await fetch(`${SCRYFALL}/cards/named?exact=${encodeURIComponent(name)}`);
+  if (r.ok) return r.json();
+  r = await fetch(`${SCRYFALL}/cards/named?fuzzy=${encodeURIComponent(name)}`);
+  return r.ok ? r.json() : null;
+}
+
+// ---- lookup ----
 $("searchBtn").addEventListener("click", () => {
   const q = $("searchInput").value.trim();
   if (q) searchScryfall(q);
@@ -182,23 +256,49 @@ $("searchBtn").addEventListener("click", () => {
 
 async function searchScryfall(query) {
   try {
-    const res = await fetch(`${SCRYFALL}/cards/named?fuzzy=${encodeURIComponent(query)}`);
-    if (res.ok) {
-      const card = await res.json();
-      showCandidate(card);
-      setStatus(`Match: ${card.name}. Confirm below or edit the name.`);
+    setStatus("Matching against Scryfall catalog…");
+    const names = await loadCardNames();
+    const matches = bestMatches(cleanName(query), names);
+    if (!matches.length) {
+      showCandidate(null); renderSuggestions([]);
+      setStatus("No close match. Edit the name and press Search.");
       return;
     }
-    // no confident match -> offer autocomplete suggestions
-    const ac = await fetch(`${SCRYFALL}/cards/autocomplete?q=${encodeURIComponent(query)}`).then(r => r.json());
-    const opts = (ac.data || []).slice(0, 5);
-    showCandidate(null);
-    setStatus(opts.length
-      ? `No exact match. Did you mean: ${opts.join(" · ")} — edit the name and Search.`
-      : "No match found. Edit the name and Search.");
+    const card = await fetchExact(matches[0].name);
+    showCandidate(card);
+    renderSuggestions(matches.slice(1));
+    const pct = Math.round((1 - matches[0].score) * 100);
+    setStatus(`Best match: ${matches[0].name} (~${pct}%). Wrong? Tap an alternative below or edit + Search.`);
   } catch (err) {
-    setStatus("Scryfall error: " + err.message);
+    setStatus("Lookup error: " + err.message);
   }
+}
+
+// clickable alternative-name chips under the candidate
+function renderSuggestions(list) {
+  const box = $("suggestions");
+  box.innerHTML = "";
+  if (!list || !list.length) { box.style.display = "none"; return; }
+  const lbl = document.createElement("span");
+  lbl.textContent = "Or:";
+  lbl.style.cssText = "font-size:13px;color:#9aa2b5;align-self:center;";
+  box.appendChild(lbl);
+  list.forEach((m) => {
+    const b = document.createElement("button");
+    b.className = "secondary";
+    b.style.cssText = "font-size:12px;padding:5px 9px;";
+    b.textContent = m.name;
+    b.addEventListener("click", async () => {
+      $("searchInput").value = m.name;
+      setStatus(`Loading ${m.name}…`);
+      const card = await fetchExact(m.name);
+      showCandidate(card);
+      renderSuggestions(list.filter((x) => x.name !== m.name));
+      setStatus(`Selected: ${m.name}. Confirm below.`);
+    });
+    box.appendChild(b);
+  });
+  box.style.display = "flex";
 }
 
 function showCandidate(card) {
@@ -243,6 +343,7 @@ $("addBtn").addEventListener("click", () => {
   renderList();
   setStatus(`Added ${qty}× ${c.name}${foil ? " (foil)" : ""}.`);
   $("candidate").style.display = "none";
+  $("suggestions").style.display = "none";
   candidate = null;
 });
 
@@ -339,3 +440,4 @@ function exportAs(fmt) {
 }
 
 renderList();
+loadCardNames().catch(() => {}); // warm the name catalog while the user aligns a card
