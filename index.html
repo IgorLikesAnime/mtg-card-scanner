@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>MTG Card Scanner</title>
   <style>
     :root { color-scheme: dark; }
@@ -22,30 +22,34 @@
     button:disabled { opacity: .45; cursor: not-allowed; }
     button:hover:not(:disabled) { filter: brightness(1.08); }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    input[type=text], input[type=number], select {
+    input[type=text], input[type=password], input[type=number], select {
       background: #0f1115; border: 1px solid #2a2f3d; color: #e6e8ee; border-radius: 6px;
       padding: 8px 10px; font-size: 14px; }
     input[type=number] { width: 64px; }
     label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
-    /* Set picker */
-    #setStatus { font-size: 13px; color: #9aa2b5; margin-top: 6px; min-height: 18px; }
-    .bar { height: 6px; background: #232838; border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
-    .bar > div { height: 100%; width: 0; background: #2f9e44; transition: width .15s; }
-    /* Camera + art guide */
+    label.fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #9aa2b5; flex: 1; min-width: 140px; }
+    /* Settings */
+    details.settings { margin-top: 10px; border: 1px solid #232838; border-radius: 8px; padding: 8px 12px; }
+    details.settings summary { cursor: pointer; font-size: 13px; color: #9aa2b5; }
+    .warn { color: #f8b4b4; font-size: 13px; }
+    /* Camera + card guide */
     .stage { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
     video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .overlay { position: absolute; inset: 0; pointer-events: none; }
-    .artbox { position: absolute; left: 8%; top: 22%; width: 84%; aspect-ratio: 1.37;
-              border: 2px solid #4dd4ff; border-radius: 8px; background: rgba(77,212,255,.06); }
+    /* portrait Magic card = 63:88 ≈ 0.716 */
+    .cardbox { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+               height: 88%; aspect-ratio: 63/88; border: 2px solid #4dd4ff; border-radius: 10px;
+               background: rgba(77,212,255,.05); }
     .hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px;
             color: #4dd4ff; text-shadow: 0 1px 2px #000; padding: 0 8px; }
     #status { font-size: 13px; color: #9aa2b5; min-height: 18px; margin-top: 8px; }
     /* Candidate */
     #candidate { display: none; gap: 12px; margin-top: 12px; }
-    #candidate img { width: 96px; border-radius: 6px; background: #000; }
+    #candidate img { width: 104px; border-radius: 6px; background: #000; }
     #candidate .meta { flex: 1; min-width: 0; }
     #candidate .meta .name { font-weight: 700; font-size: 15px; }
     #candidate .meta .sub { color: #9aa2b5; font-size: 13px; }
+    .read { font-size: 12px; color: #6b7280; margin-top: 4px; }
     /* List */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232838; }
@@ -62,61 +66,73 @@
 <body>
   <header>
     <h1>🃏 MTG Card Scanner</h1>
-    <p>Pick the set you're scanning, then point your camera at each card's artwork. Cards are matched by image (like Delver Lens) — no OCR, works in any language.</p>
+    <p>Point your camera at a card and Capture. A vision model reads the name and the bottom-left collector number to identify the <b>exact printing</b> — any set, any language.</p>
   </header>
 
   <main>
-    <!-- LEFT: set + camera + recognition -->
+    <!-- LEFT: camera + recognition -->
     <section class="card">
       <h2>Scan</h2>
 
-      <!-- 1. choose the set to scan -->
-      <div class="row">
-        <input type="text" id="setInput" list="setList" placeholder="Type a set name or code…" style="flex:1; min-width:180px" />
-        <datalist id="setList"></datalist>
-        <button id="loadSetBtn" class="secondary">Load set</button>
-      </div>
-      <div id="setStatus">Loading set list…</div>
-      <div class="bar" id="learnBar"><div id="learnFill"></div></div>
-
-      <!-- 2. camera -->
-      <div class="stage" style="margin-top:12px">
+      <div class="stage">
         <video id="video" playsinline muted></video>
         <div class="overlay">
-          <div class="artbox"></div>
-          <div class="hint" id="hint">Fill the blue box with the card's ARTWORK, then Capture</div>
+          <div class="cardbox"></div>
+          <div class="hint" id="hint">Fit the WHOLE card inside the box, then Capture</div>
         </div>
       </div>
       <div class="row" style="margin-top:10px">
         <button id="startBtn">Start camera</button>
-        <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; match</button>
+        <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; identify</button>
       </div>
-      <div id="status">Choose a set to begin.</div>
-      <canvas id="capPreview" title="Captured artwork" style="display:none; margin-top:8px; width:100%; max-width:220px; border:1px solid #2a2f3d; border-radius:6px; background:#000;"></canvas>
+      <div id="status">Start the camera to begin.</div>
+      <canvas id="capPreview" title="Captured card" style="display:none; margin-top:8px; width:100%; max-width:200px; border:1px solid #2a2f3d; border-radius:6px; background:#000;"></canvas>
 
-      <!-- 3. result -->
+      <details class="settings" id="settings">
+        <summary>⚙️ Advanced — use your own scanner (optional)</summary>
+        <p style="font-size:12px;color:#9aa2b5;margin:10px 0 0">
+          Nothing to fill in to scan — the app works as-is. If you run your own Cloudflare
+          Worker (see the project README), point the app at it here. Saved in this browser only.
+        </p>
+        <div class="row" style="margin-top:10px">
+          <label class="fld">Worker URL
+            <input type="text" id="workerUrl" placeholder="https://your-worker.you.workers.dev" />
+          </label>
+          <label class="fld">App token
+            <input type="password" id="appToken" placeholder="your Worker's APP_TOKEN" />
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="saveSettings" class="secondary">Save</button>
+          <span id="settingsMsg" style="font-size:12px;color:#9aa2b5"></span>
+        </div>
+      </details>
+
+      <!-- result -->
       <div id="candidate">
         <img id="candImg" alt="" />
         <div class="meta">
           <div class="name" id="candName">—</div>
           <div class="sub" id="candSub">—</div>
+          <div class="read" id="candRead"></div>
+
+          <!-- correction / manual resolve -->
           <div class="row" style="margin-top:8px">
-            <input type="text" id="searchInput" placeholder="Wrong? Search by name" style="flex:1" />
+            <input type="text" id="searchInput" placeholder="Wrong? Type the card name" style="flex:1" />
             <button id="searchBtn" class="secondary">Search</button>
           </div>
           <div id="suggestions" class="row" style="display:none; margin-top:8px"></div>
-          <div class="row" style="margin-top:8px">
+
+          <!-- printing / language picker -->
+          <div class="row" style="margin-top:10px">
             <label class="chk">Lang
-              <select id="langSelect">
-                <option value="en" selected>EN</option>
-                <option value="ja">JA</option>
-                <option value="fr">FR</option>
-                <option value="de">DE</option>
-                <option value="it">IT</option>
-                <option value="es">ES</option>
-                <option value="pt">PT</option>
-              </select>
+              <select id="langSelect"><option value="">—</option></select>
             </label>
+            <label class="chk" style="flex:1; min-width:180px">Printing
+              <select id="printingSelect" style="flex:1"><option value="">—</option></select>
+            </label>
+          </div>
+          <div class="row" style="margin-top:8px">
             <label class="chk"><input type="checkbox" id="foilChk" /> Foil</label>
             <label class="chk">Qty <input type="number" id="qtyInput" value="1" min="1" /></label>
             <button id="addBtn" disabled>➕ Add to list</button>
@@ -131,7 +147,7 @@
     <section class="card">
       <h2>Scanned cards (<span id="count">0</span>)</h2>
       <div id="listWrap">
-        <div class="empty" id="emptyMsg">No cards yet — load a set and scan one.</div>
+        <div class="empty" id="emptyMsg">No cards yet — scan one.</div>
         <table id="table" style="display:none">
           <thead>
             <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Lang</th><th>Foil</th><th></th></tr>
@@ -148,7 +164,7 @@
       </div>
       <a id="dl" class="dl"></a>
       <p style="font-size:12px;color:#6b7280;margin:12px 0 0">
-        Matching uses perceptual hashing of card artwork against the loaded set (data &amp; images from <code>Scryfall</code>). Set the <b>Lang</b> for non‑English copies — the art is identical across languages.
+        A vision model reads each card; the exact printing is resolved from <code>Scryfall</code>. Confirm the printing/language before adding, then export.
       </p>
     </section>
   </main>

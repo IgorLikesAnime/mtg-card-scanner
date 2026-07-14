@@ -2,3 +2,22 @@
 *.log
 .DS_Store
 Thumbs.db
+
+# Cloudflare Worker local dev / secrets (NEVER commit these)
+worker/.dev.vars
+worker/.wrangler/
+node_modules/
+
+# Local build artifacts from the self-hosted branch (rebuild-selfhosted) that may
+# linger in this shared working directory — not part of the cloud-vision app.
+mtg.db
+mtg.db.gz
+mtg.db-wal
+mtg.db-shm
+data/
+.venv/
+web/thumbs/
+cert.pem
+key.pem
+run-windows.bat
+__pycache__/

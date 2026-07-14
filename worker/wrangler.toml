@@ -1,0 +1,25 @@
+name = "mtg-scanner-vision"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Non-secret config. ALLOWED_ORIGIN must be your GitHub Pages origin (no trailing slash),
+# e.g. https://igorlikesanime.github.io  — override per-deploy as needed.
+[vars]
+ALLOWED_ORIGIN = "https://igorlikesanime.github.io"
+GEMINI_MODEL = "gemini-flash-latest"
+
+# Secrets are NOT stored here. Set them once after deploy:
+#   wrangler secret put GEMINI_API_KEY
+#   wrangler secret put APP_TOKEN
+
+# Optional per-IP rate limit (Workers Rate Limiting, GA). This is a public tool — every scan
+# spends the owner's Gemini quota — so limit how fast one client can hit /identify. The Worker
+# treats the binding as OPTIONAL and falls back to the Gemini budget cap if it's absent.
+# Deploying via the Cloudflare dashboard instead of wrangler? Add this under the Worker's
+# Settings -> Bindings -> Rate limiting, named RATE_LIMITER, limit 15, period 60.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+[ratelimits.simple]
+limit = 15
+period = 60

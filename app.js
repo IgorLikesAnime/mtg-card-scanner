@@ -1,210 +1,86 @@
-/* MTG Card Scanner — set-locked perceptual-hash recognition.
-   Pick a set -> download+hash its card artworks (once, cached) -> match a camera
-   shot against them by image (dHash+aHash Hamming distance). No OCR, language-
-   independent. Data & images from Scryfall (CDN sends CORS, so canvas hashing
-   works client-side). List/export logic unchanged from earlier versions. */
+/* MTG Card Scanner — cloud-vision client.
+   Capture the whole card -> POST to your Cloudflare Worker, which asks Gemini to
+   read the name + bottom-left collector number/set/language -> resolve the exact
+   printing from Scryfall -> confirm/correct -> add -> export.
+   List/export logic is carried over from the earlier version unchanged. */
 
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+const SCRYFALL = "https://api.scryfall.com";
+const LANGS = ["en", "ja", "de", "fr", "it", "es", "pt", "ru", "ko", "zhs", "zht"];
+
 const video = $("video");
 const frameCanvas = $("frameCanvas");
-const SCRYFALL = "https://api.scryfall.com";
+const cropCanvas = document.createElement("canvas");
 
 let stream = null;
-let candidate = null;
+let currentCard = null;   // resolved Scryfall card object to add
+let prints = [];          // printings of the current card (for the picker)
 let collected = [];
-let ALL_SETS = [];
-let refCards = [];        // [{id,name,set,collector_number,rarity,small,hash:Uint8Array}]
-let currentSetName = "";
 
 const setStatus = (m) => { $("status").textContent = m; };
-const setSetStatus = (m) => { $("setStatus").textContent = m; };
-const showBar = (on) => { $("learnBar").style.display = on ? "block" : "none"; if (!on) setFill(0); };
-const setFill = (f) => { $("learnFill").style.width = Math.round(f * 100) + "%"; };
+
+// ---------- settings (Worker URL + app token in localStorage) ----------
+function loadSettings() {
+  $("workerUrl").value = localStorage.getItem("mtg_worker_url") || "";
+  $("appToken").value = localStorage.getItem("mtg_app_token") || "";
+  if (!getWorkerUrl() || !getToken()) $("settings").open = true;
+}
+// Hosted public tool: the app ships with a default Worker + token so anyone can scan out of
+// the box. The token is NOT a secret (it's public here by design and only gates the Worker,
+// which holds the real Gemini key server-side). Advanced users can override both in Settings,
+// which are stored per-browser and take precedence over these defaults.
+const DEFAULT_WORKER_URL = "https://mtgcardscanner.amirmag1851.workers.dev";
+const DEFAULT_APP_TOKEN = "0c415ef93e153b9959314db675a064e9";
+const getWorkerUrl = () => (localStorage.getItem("mtg_worker_url") || DEFAULT_WORKER_URL).replace(/\/+$/, "");
+const getToken = () => localStorage.getItem("mtg_app_token") || DEFAULT_APP_TOKEN;
+
+$("saveSettings").addEventListener("click", () => {
+  localStorage.setItem("mtg_worker_url", $("workerUrl").value.trim());
+  localStorage.setItem("mtg_app_token", $("appToken").value.trim());
+  $("settingsMsg").textContent = "Saved.";
+  setTimeout(() => ($("settingsMsg").textContent = ""), 1500);
+});
 
 // ---------- camera ----------
 $("startBtn").addEventListener("click", async () => {
   try {
     setStatus("Requesting camera…");
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 960 } },
+      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1440 } },
       audio: false,
     });
     video.srcObject = stream;
     await video.play();
-    await reduceExposure(stream);
     $("startBtn").textContent = "Camera on";
     $("startBtn").disabled = true;
-    if (refCards.length) { $("captureBtn").disabled = false; setStatus("Fill the box with a card's artwork and Capture."); }
-    else setStatus("Camera on. Now load a set to match against.");
+    $("captureBtn").disabled = false;
+    setStatus("Fit the whole card in the box and Capture.");
   } catch (err) {
-    setStatus("Camera error: " + err.message + " (allow camera access, use https / localhost)");
+    setStatus("Camera error: " + err.message + " (allow camera access; needs HTTPS)");
   }
 });
 
-async function reduceExposure(stream) {
-  try {
-    const track = stream.getVideoTracks()[0];
-    const caps = track.getCapabilities?.() || {};
-    const adv = [];
-    const lower = (c) => Math.round(c.min + (c.max - c.min) * 0.33);
-    if (caps.brightness) adv.push({ brightness: lower(caps.brightness) });
-    if (caps.exposureMode?.includes?.("continuous")) adv.push({ exposureMode: "continuous" });
-    if (adv.length) await track.applyConstraints({ advanced: adv });
-  } catch { /* unsupported */ }
-}
-
-// ---------- perceptual hashing (dHash 8x8 + aHash 8x8 = 128 bits) ----------
-const hc = document.createElement("canvas");
-const hctx = hc.getContext("2d", { willReadFrequently: true });
-
-function grayResize(src, sx, sy, sw, sh, w, h) {
-  hc.width = w; hc.height = h;
-  hctx.imageSmoothingEnabled = true;
-  hctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
-  const d = hctx.getImageData(0, 0, w, h).data;
-  const g = new Float64Array(w * h);
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) g[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-  return g;
-}
-
-function hashRegion(src, sx, sy, sw, sh) {
-  const dg = grayResize(src, sx, sy, sw, sh, 9, 8); // dHash source
-  const ag = grayResize(src, sx, sy, sw, sh, 8, 8); // aHash source
-  const bits = new Uint8Array(16);
-  let bit = 0;
-  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-    if (dg[y * 9 + x] < dg[y * 9 + x + 1]) bits[bit >> 3] |= (1 << (bit & 7));
-    bit++;
-  }
-  let mean = 0; for (let i = 0; i < 64; i++) mean += ag[i]; mean /= 64;
-  for (let i = 0; i < 64; i++) { if (ag[i] >= mean) bits[bit >> 3] |= (1 << (bit & 7)); bit++; }
-  return bits;
-}
-
-const POP = (() => { const t = new Uint8Array(256); for (let i = 0; i < 256; i++) t[i] = (i & 1) + t[i >> 1]; return t; })();
-function hamming(a, b) { let d = 0; for (let i = 0; i < 16; i++) d += POP[a[i] ^ b[i]]; return d; }
-const toHex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-const fromHex = (h) => { const b = new Uint8Array(16); for (let i = 0; i < 16; i++) b[i] = parseInt(h.substr(i * 2, 2), 16); return b; };
-
-function loadImg(url) {
-  return new Promise((res, rej) => {
-    const im = new Image();
-    im.crossOrigin = "anonymous";
-    im.onload = () => res(im);
-    im.onerror = () => rej(new Error("image load failed"));
-    im.src = url;
-  });
-}
-
-// ---------- set list + learning ----------
-async function loadSetList() {
-  try {
-    const data = (await fetch(`${SCRYFALL}/sets`).then((r) => r.json())).data || [];
-    const keep = new Set(["core", "expansion", "masters", "draft_innovation", "commander",
-      "masterpiece", "funny", "starter", "box", "duel_deck", "from_the_vault",
-      "premium_deck", "planechase", "archenemy", "spellbook", "arsenal", "alchemy"]);
-    ALL_SETS = data.filter((s) => s.card_count > 0 && keep.has(s.set_type) && !s.digital)
-      .sort((a, b) => (b.released_at || "").localeCompare(a.released_at || ""));
-    const dl = $("setList");
-    dl.innerHTML = "";
-    ALL_SETS.forEach((s) => {
-      const o = document.createElement("option");
-      o.value = `${s.name} (${s.code.toUpperCase()})`;
-      dl.appendChild(o);
-    });
-    setSetStatus(`Loaded ${ALL_SETS.length} sets. Type a set name or code, then Load set.`);
-  } catch (e) {
-    setSetStatus("Couldn't load set list: " + e.message);
-  }
-}
-
-function resolveSet(text) {
-  const t = text.trim().toLowerCase();
-  if (!t) return null;
-  const paren = t.match(/\(([^)]+)\)\s*$/);
-  if (paren) { const s = ALL_SETS.find((x) => x.code.toLowerCase() === paren[1].toLowerCase()); if (s) return s; }
-  return ALL_SETS.find((x) => x.code.toLowerCase() === t)
-      || ALL_SETS.find((x) => x.name.toLowerCase() === t)
-      || ALL_SETS.find((x) => x.name.toLowerCase().startsWith(t))
-      || null;
-}
-
-async function learnSet(set) {
-  currentSetName = set.name;
-  $("captureBtn").disabled = true;
-  const key = "hashset_" + set.code + "_v2";
-  const cached = localStorage.getItem(key);
-  if (cached) {
-    refCards = JSON.parse(cached).map((c) => ({ ...c, hash: fromHex(c.hashHex) }));
-    onSetReady(set, true);
+// ---------- capture -> Worker /identify ----------
+$("captureBtn").addEventListener("click", () => {
+  if (!getWorkerUrl() || !getToken()) {
+    $("settings").open = true;
+    setStatus("Set your Worker URL and app token in Settings first.");
     return;
   }
-  setSetStatus(`Fetching ${set.name} card list…`);
-  let url = `${SCRYFALL}/cards/search?q=${encodeURIComponent("set:" + set.code)}&unique=prints&order=set`;
-  const list = [];
-  try {
-    while (url) {
-      const j = await fetch(url).then((r) => r.json());
-      for (const c of j.data || []) {
-        const u = c.image_uris || c.card_faces?.[0]?.image_uris;
-        if (u?.art_crop) list.push({ id: c.id, name: c.name, set: c.set, collector_number: c.collector_number, rarity: c.rarity, art: u.art_crop, small: u.small });
-      }
-      url = j.has_more ? j.next_page : null;
-    }
-  } catch (e) { setSetStatus("Set fetch failed: " + e.message); return; }
-
-  showBar(true);
-  refCards = [];
-  for (let i = 0; i < list.length; i++) {
-    setFill(i / list.length);
-    setSetStatus(`Learning ${set.name}: ${i + 1}/${list.length}…`);
-    try {
-      const img = await loadImg(list[i].art);
-      const h = hashRegion(img, 0, 0, img.naturalWidth, img.naturalHeight);
-      refCards.push({ id: list[i].id, name: list[i].name, set: list[i].set, collector_number: list[i].collector_number, rarity: list[i].rarity, small: list[i].small, hash: h, hashHex: toHex(h) });
-    } catch { /* skip unreadable image */ }
-  }
-  showBar(false);
-  try {
-    localStorage.setItem(key, JSON.stringify(refCards.map((c) =>
-      ({ id: c.id, name: c.name, set: c.set, collector_number: c.collector_number, rarity: c.rarity, small: c.small, hashHex: c.hashHex }))));
-  } catch { /* quota — keep in memory for this session */ }
-  onSetReady(set, false);
-}
-
-function onSetReady(set, cached) {
-  setSetStatus(`✅ ${set.name} ready — ${refCards.length} cards${cached ? " (cached)" : ""}.`);
-  if (stream) { $("captureBtn").disabled = false; setStatus("Fill the box with a card's artwork and Capture."); }
-  else setStatus("Set ready. Start the camera to scan.");
-}
-
-$("loadSetBtn").addEventListener("click", () => {
-  const s = resolveSet($("setInput").value);
-  if (!s) { setSetStatus("Set not found — pick one from the list."); return; }
-  learnSet(s);
-});
-$("setInput").addEventListener("change", () => {
-  const s = resolveSet($("setInput").value);
-  if (s) learnSet(s);
-});
-
-// ---------- capture + match ----------
-$("captureBtn").addEventListener("click", () => {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) { setStatus("Camera not ready."); return; }
-  if (!refCards.length) { setStatus("Load a set first."); return; }
 
   frameCanvas.width = vw; frameCanvas.height = vh;
   frameCanvas.getContext("2d").drawImage(video, 0, 0, vw, vh);
 
-  // map the art box element back to source pixels through object-fit: cover
+  // map the card guide box back to source pixels through object-fit: cover
   const stage = document.querySelector(".stage");
   const sRect = stage.getBoundingClientRect();
-  const aRect = document.querySelector(".artbox").getBoundingClientRect();
-  const fx = (aRect.left - sRect.left) / sRect.width, fy = (aRect.top - sRect.top) / sRect.height;
-  const fw = aRect.width / sRect.width, fh = aRect.height / sRect.height;
+  const bRect = document.querySelector(".cardbox").getBoundingClientRect();
+  const fx = (bRect.left - sRect.left) / sRect.width, fy = (bRect.top - sRect.top) / sRect.height;
+  const fw = bRect.width / sRect.width, fh = bRect.height / sRect.height;
   const stageAR = sRect.width / sRect.height, vidAR = vw / vh;
   let visW = 1, visH = 1, cropX = 0, cropY = 0;
   if (vidAR >= stageAR) { visW = stageAR / vidAR; cropX = (1 - visW) / 2; }
@@ -212,89 +88,162 @@ $("captureBtn").addEventListener("click", () => {
   const sx = Math.round((cropX + fx * visW) * vw), sy = Math.round((cropY + fy * visH) * vh);
   const sw = Math.round(fw * visW * vw), sh = Math.round(fh * visH * vh);
 
+  // downscale so the longest side is <= 1024 (keeps Gemini tokens/cost low)
+  const scale = Math.min(1, 1024 / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * scale)), dh = Math.max(1, Math.round(sh * scale));
+  cropCanvas.width = dw; cropCanvas.height = dh;
+  cropCanvas.getContext("2d").drawImage(frameCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+
   const prev = $("capPreview");
-  prev.width = sw; prev.height = sh;
-  prev.getContext("2d").drawImage(frameCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  prev.width = dw; prev.height = dh;
+  prev.getContext("2d").drawImage(cropCanvas, 0, 0);
   prev.style.display = "block";
 
-  const h = hashRegion(frameCanvas, sx, sy, sw, sh);
-  const scored = refCards.map((c) => [hamming(h, c.hash), c]).sort((a, b) => a[0] - b[0]);
-  const [dist, best] = scored[0];
-  const conf = Math.max(0, Math.round((1 - dist / 128) * 100));
-  showCandidate(cardFromRef(best));
-  renderSuggestions(scored.slice(1, 6).map(([, c]) => ({ name: c.name })));
-  setStatus(`Match: ${best.name} (~${conf}%). Wrong? Pick an alternative or search by name.`);
+  setStatus("Identifying…");
+  cropCanvas.toBlob((blob) => identify(blob), "image/jpeg", 0.8);
 });
 
-function cardFromRef(rc) {
-  return {
-    id: rc.id, name: rc.name, set: rc.set, set_name: currentSetName,
-    collector_number: rc.collector_number, rarity: rc.rarity,
-    lang: $("langSelect").value, image_uris: { small: rc.small },
-  };
+async function identify(blob) {
+  try {
+    const r = await fetch(getWorkerUrl() + "/identify", {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg", "x-app-token": getToken() },
+      body: blob,
+    });
+    const j = await r.json();
+    if (!r.ok || j.error) { setStatus("Identify failed: " + (j.error || r.status)); return; }
+    await handleRead(j);
+  } catch (e) {
+    setStatus("Couldn't reach the Worker: " + e.message + " (check the URL in Settings)");
+  }
 }
 
-// ---------- manual name fallback (fuzzy over the loaded set's names) ----------
-$("searchBtn").addEventListener("click", () => {
+// ---------- resolve what Gemini read into an exact Scryfall printing ----------
+async function handleRead(read) {
+  const readStr = [read.name, read.set_code && `[${read.set_code.toUpperCase()} #${read.collector_number || "?"}]`,
+    read.language && read.language !== "en" ? read.language.toUpperCase() : null]
+    .filter(Boolean).join(" ");
+  $("candRead").textContent = "Read: " + (readStr || "—") +
+    (read.confidence != null ? ` (~${Math.round(read.confidence * 100)}%)` : "");
+  $("searchInput").value = read.name || "";
+
+  let card = null;
+  if (read.set_code && read.collector_number) {
+    card = await scryExact(read.set_code, read.collector_number, read.language);
+  }
+  if (!card && read.name) card = await scryNamed(read.name);
+  if (!card) { setStatus("Couldn't resolve that card. Try Search by name."); showCandidate(null); return; }
+
+  await setCurrentCard(card, read.foil);
+  setStatus(`Identified: ${card.name}. Confirm printing/language, then Add.`);
+}
+
+async function scryGet(url) {
+  try {
+    const r = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j && j.object === "error" ? null : j;
+  } catch {
+    return null;
+  }
+}
+const scryExact = (set, num, lang) => {
+  const base = `${SCRYFALL}/cards/${encodeURIComponent(set.toLowerCase())}/${encodeURIComponent(num)}`;
+  return scryGet(lang && lang !== "en" ? `${base}/${lang}` : base).then((c) => c || scryGet(base));
+};
+const scryNamed = (name) => scryGet(`${SCRYFALL}/cards/named?fuzzy=${encodeURIComponent(name)}`);
+
+// ---------- candidate + printing/language picker ----------
+async function setCurrentCard(card, foilGuess) {
+  currentCard = card;
+  renderCandidate(card);
+  await loadPrints(card);
+  const finishes = card.finishes || [];
+  const canFoil = finishes.includes("foil") || finishes.includes("etched");
+  $("foilChk").disabled = !canFoil;
+  $("foilChk").checked = canFoil && !!foilGuess;
+  $("addBtn").disabled = false;
+}
+
+function cardImg(card) {
+  return card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small || "";
+}
+
+function renderCandidate(card) {
+  $("candidate").style.display = "flex";
+  if (!card) {
+    $("candImg").removeAttribute("src");
+    $("candName").textContent = "—";
+    $("candSub").textContent = "No confirmed match yet.";
+    $("addBtn").disabled = true;
+    return;
+  }
+  $("candImg").src = cardImg(card);
+  $("candName").textContent = card.name;
+  $("candSub").textContent =
+    `${card.set_name} (${(card.set || "").toUpperCase()}) · #${card.collector_number} · ${(card.lang || "en").toUpperCase()} · ${card.rarity || ""}`;
+}
+
+async function loadPrints(card) {
+  prints = [];
+  if (card.prints_search_uri) {
+    const j = await scryGet(card.prints_search_uri);
+    prints = (j && j.data) || [];
+  }
+  if (!prints.length) prints = [card];
+
+  // language options (fixed common set); printing options come from prints list
+  const langSel = $("langSelect");
+  langSel.innerHTML = "";
+  LANGS.forEach((l) => {
+    const o = document.createElement("option");
+    o.value = l; o.textContent = l.toUpperCase();
+    langSel.appendChild(o);
+  });
+  langSel.value = LANGS.includes(card.lang) ? card.lang : "en";
+
+  const pSel = $("printingSelect");
+  pSel.innerHTML = "";
+  prints.forEach((p, i) => {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = `${(p.set || "").toUpperCase()} #${p.collector_number} · ${p.set_name}`;
+    pSel.appendChild(o);
+  });
+  const idx = prints.findIndex((p) => p.id === card.id);
+  pSel.value = String(idx >= 0 ? idx : 0);
+}
+
+async function onPickerChange() {
+  const p = prints[parseInt($("printingSelect").value, 10)] || currentCard;
+  const lang = $("langSelect").value;
+  setStatus("Loading printing…");
+  const card = (await scryExact(p.set, p.collector_number, lang)) || p;
+  currentCard = card;
+  renderCandidate(card);
+  const finishes = card.finishes || [];
+  $("foilChk").disabled = !(finishes.includes("foil") || finishes.includes("etched"));
+  if ($("foilChk").disabled) $("foilChk").checked = false;
+  setStatus(`${card.name} — ${(card.set || "").toUpperCase()} #${card.collector_number} [${(card.lang || "en").toUpperCase()}].`);
+}
+$("langSelect").addEventListener("change", onPickerChange);
+$("printingSelect").addEventListener("change", onPickerChange);
+
+// ---------- manual name search fallback (Scryfall) ----------
+$("searchBtn").addEventListener("click", doSearch);
+$("searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+
+async function doSearch() {
   const q = $("searchInput").value.trim();
-  if (q) searchByName(q);
-});
-
-function searchByName(query) {
-  if (!refCards.length) { setStatus("Load a set first."); return; }
-  const matches = bestMatches(cleanName(query), refCards.map((c) => c.name));
-  if (!matches.length) { showCandidate(null); renderSuggestions([]); setStatus("No matching name in this set."); return; }
-  const rc = refCards.find((c) => c.name === matches[0].name);
-  showCandidate(cardFromRef(rc));
-  renderSuggestions(matches.slice(1).map((m) => ({ name: m.name })));
-  setStatus(`Name match: ${matches[0].name}. Confirm or pick an alternative.`);
-}
-
-function cleanName(text) {
-  const toks = text.replace(/[^A-Za-z',\- ]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-  while (toks.length > 1 && toks[0].length === 1) toks.shift();
-  while (toks.length > 1 && toks[toks.length - 1].length === 1) toks.pop();
-  return toks.join(" ");
-}
-
-function lev(a, b, max) {
-  if (Math.abs(a.length - b.length) > max) return max + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = new Array(b.length + 1); cur[0] = i;
-    const ac = a.charCodeAt(i - 1); let best = i;
-    for (let j = 1; j <= b.length; j++) {
-      const cost = ac === b.charCodeAt(j - 1) ? 0 : 1;
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
-      if (cur[j] < best) best = cur[j];
-    }
-    if (best > max) return max + 1;
-    prev = cur;
-  }
-  return prev[b.length];
-}
-
-function bestMatches(query, names, k = 6) {
-  const q = query.toLowerCase().trim();
-  if (q.length < 2) return [];
-  const qTokens = q.split(" ").filter(Boolean);
-  const maxD = Math.max(2, Math.ceil(q.length * 0.5));
-  const top = [];
-  for (const name of names) {
-    const n = name.toLowerCase();
-    const lenClose = Math.abs(n.length - q.length) <= maxD;
-    const overlap = qTokens.some((t) => t.length >= 3 && n.includes(t));
-    if (!lenClose && !overlap) continue;
-    const d = lev(q, n, lenClose ? maxD : Math.max(q.length, n.length));
-    let sim = 1 - d / Math.max(q.length, n.length);
-    if (n === q) sim = 1;
-    else if (qTokens.every((t) => n.split(" ").includes(t))) sim = Math.max(sim, 0.7 + 0.3 * sim);
-    if (sim < 0.35 || (!overlap && sim < 0.7)) continue;
-    const score = 1 - sim;
-    if (top.length < k) { top.push({ name, score }); top.sort((a, b) => a.score - b.score); }
-    else if (score < top[k - 1].score) { top[k - 1] = { name, score }; top.sort((a, b) => a.score - b.score); }
-  }
-  return top;
+  if (!q) return;
+  setStatus("Searching…");
+  const j = await scryGet(`${SCRYFALL}/cards/search?q=${encodeURIComponent(q)}&unique=cards&order=released`);
+  const results = (j && j.data) || [];
+  if (!results.length) { setStatus("No cards found for that name."); return; }
+  await setCurrentCard(results[0]);
+  renderSuggestions(results.slice(1, 6));
+  setStatus(`Found: ${results[0].name}. Confirm or pick an alternative.`);
 }
 
 function renderSuggestions(list) {
@@ -305,62 +254,38 @@ function renderSuggestions(list) {
   lbl.textContent = "Or:";
   lbl.style.cssText = "font-size:13px;color:#9aa2b5;align-self:center;";
   box.appendChild(lbl);
-  list.forEach((m) => {
+  list.forEach((c) => {
     const b = document.createElement("button");
     b.className = "secondary"; b.style.cssText = "font-size:12px;padding:5px 9px;";
-    b.textContent = m.name;
-    b.addEventListener("click", () => {
-      const rc = refCards.find((c) => c.name === m.name);
-      if (!rc) return;
-      $("searchInput").value = m.name;
-      showCandidate(cardFromRef(rc));
-      renderSuggestions(list.filter((x) => x.name !== m.name));
-      setStatus(`Selected: ${m.name}. Confirm below.`);
+    b.textContent = `${c.name} (${(c.set || "").toUpperCase()})`;
+    b.addEventListener("click", async () => {
+      await setCurrentCard(c);
+      renderSuggestions(list.filter((x) => x.id !== c.id));
+      setStatus(`Selected: ${c.name}. Confirm below.`);
     });
     box.appendChild(b);
   });
   box.style.display = "flex";
 }
 
-// ---------- candidate ----------
-function renderCandidateInfo(card) {
-  $("candImg").src = card.image_uris?.small || "";
-  $("candName").textContent = card.name;
-  $("candSub").textContent = `${card.set_name} (${(card.set || "").toUpperCase()}) · #${card.collector_number} · ${card.rarity}`;
-}
-
-function showCandidate(card) {
-  candidate = card;
-  $("candidate").style.display = "flex";
-  if (!card) {
-    $("candImg").removeAttribute("src");
-    $("candName").textContent = "—";
-    $("candSub").textContent = "No confirmed match yet.";
-    $("addBtn").disabled = true;
-    return;
-  }
-  renderCandidateInfo(card);
-  $("foilChk").checked = false;
-  $("qtyInput").value = 1;
-  $("addBtn").disabled = false;
-}
+function showCandidate(card) { renderCandidate(card); if (!card) { prints = []; currentCard = null; } }
 
 // ---------- collected list ----------
 $("addBtn").addEventListener("click", () => {
-  if (!candidate) return;
+  if (!currentCard) return;
   const foil = $("foilChk").checked;
-  const lang = $("langSelect").value;
   const qty = Math.max(1, parseInt($("qtyInput").value, 10) || 1);
-  const c = { id: candidate.id, name: candidate.name, set: candidate.set, set_name: candidate.set_name,
-    collector_number: candidate.collector_number, rarity: candidate.rarity, lang };
-  const ex = collected.find((e) => e.card.id === c.id && e.foil === foil && e.card.lang === lang);
+  const c = { id: currentCard.id, name: currentCard.name, set: currentCard.set,
+    set_name: currentCard.set_name, collector_number: currentCard.collector_number,
+    rarity: currentCard.rarity, lang: currentCard.lang || "en" };
+  const ex = collected.find((e) => e.card.id === c.id && e.foil === foil);
   if (ex) ex.qty += qty;
   else collected.push({ qty, foil, card: c });
   renderList();
-  setStatus(`Added ${qty}× ${c.name}${foil ? " (foil)" : ""}${lang !== "en" ? " [" + lang.toUpperCase() + "]" : ""}.`);
+  setStatus(`Added ${qty}× ${c.name}${foil ? " (foil)" : ""} [${(c.lang || "en").toUpperCase()}].`);
   $("candidate").style.display = "none";
   $("suggestions").style.display = "none";
-  candidate = null;
+  currentCard = null; prints = [];
 });
 
 function renderList() {
@@ -393,10 +318,10 @@ function renderList() {
   });
 }
 
-const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) =>
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-// ---------- exports ----------
+// ---------- exports (carried over unchanged) ----------
 document.querySelectorAll(".exports button").forEach((b) =>
   b.addEventListener("click", () => exportAs(b.dataset.fmt)));
 
@@ -450,5 +375,5 @@ function exportAs(fmt) {
 }
 
 // ---------- init ----------
+loadSettings();
 renderList();
-loadSetList();
