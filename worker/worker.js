@@ -81,7 +81,9 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(allowed || origin) });
     }
     if (url.pathname === "/health") {
-      return json({ ok: true }, 200, allowed || origin);
+      // `ratelimit` reflects whether the RATE_LIMITER binding is visible to this code —
+      // handy for confirming a deploy picked up both the new code and the binding.
+      return json({ ok: true, ratelimit: !!env.RATE_LIMITER }, 200, allowed || origin);
     }
     if (url.pathname !== "/identify" || request.method !== "POST") {
       return json({ error: "not found" }, 404, allowed || origin);
