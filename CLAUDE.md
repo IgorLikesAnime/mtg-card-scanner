@@ -65,8 +65,8 @@ see `README.md`.
 ## Quirks / guardrails
 - **Never `git add -A`** here — it tries to scan ~54k gitignored thumbnails and hangs. Stage explicit
   paths (`git add index.html app.js …`).
-- Repo lives on the **Windows filesystem via WSL** (`/path/to/mtg-card-scanner`). Remote:
-  `IgorLikesAnime/mtg-card-scanner`.
+- Repo lives on the **Windows filesystem via WSL** (under `/mnt/c/`), so expect Windows FS
+  performance/permissions quirks. Remote: `IgorLikesAnime/mtg-card-scanner`.
 - ~3.7 GB of gitignored local artifacts (`mtg.db`, `web/thumbs/`, `data/`, `.venv`) linger from an old
   offline attempt — harmless, ignore.
 - **Camera needs HTTPS/localhost;** `file://` won't get it. Identify needs internet (Gemini + Scryfall).
