@@ -85,8 +85,8 @@
     .corner.bl { bottom: -1px; left: -1px; border-right: 0; border-top: 0; border-bottom-left-radius: 6px; }
     .corner.br { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 6px; }
     .scanline {
-      position: absolute; left: 0; right: 0; top: 0; height: 1px; opacity: 0;
-      background: rgba(255, 255, 255, .75);
+      position: absolute; left: 0; right: 0; top: 0; height: 2px; opacity: 0;
+      background: rgba(255, 255, 255, .85);
     }
     .hint {
       position: absolute; left: 0; right: 0; bottom: 8px; text-align: center;
@@ -104,7 +104,11 @@
     }
     body.scanning .spinner { display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    #capPreview { margin-top: 12px; width: 100%; max-width: 180px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; }
+    .preview { position: relative; display: inline-block; width: 100%; max-width: 180px; margin-top: 12px; vertical-align: top; }
+    #capPreview { width: 100%; border: 1px solid var(--line-2); border-radius: 8px; background: #000; }
+    .stage, .hint { transition: opacity .2s ease; }
+    body.scanning .stage { opacity: .5; }
+    body.scanning .hint { opacity: 0; }
 
     /* ---------- candidate result ---------- */
     #candidate { display: none; gap: 14px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); align-items: flex-start; }
@@ -187,7 +191,6 @@
             <span class="corner tr"></span>
             <span class="corner bl"></span>
             <span class="corner br"></span>
-            <span class="scanline" aria-hidden="true"></span>
           </div>
           <div class="hint" id="hint">Fit the whole card inside the frame</div>
         </div>
@@ -202,7 +205,10 @@
         <span class="spinner" id="spinner" aria-hidden="true"></span>
         <span id="status">Start the camera to begin.</span>
       </div>
-      <canvas id="capPreview" title="Captured card" style="display:none"></canvas>
+      <div class="preview">
+        <canvas id="capPreview" title="Captured card" style="display:none"></canvas>
+        <span class="scanline" aria-hidden="true"></span>
+      </div>
 
       <!-- result -->
       <div id="candidate">
