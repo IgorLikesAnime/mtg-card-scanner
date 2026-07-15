@@ -76,9 +76,9 @@ see `README.md`.
 - Don't touch `worker/`, `wrangler.toml`, or export functions without a clear reason.
 
 ## Other branches (don't disturb without reason)
-- `cloud-vision-gemini` — snapshot of the cloud-vision app before it was consolidated onto `main`.
-- `rebuild-selfhosted` — abandoned fully-offline attempt (Python server + prebuilt SQLite art
-  fingerprints). Heavier and less accurate in-hand; superseded by cloud vision.
+- `rebuild-selfhosted` — **local-only** (not on GitHub): abandoned fully-offline attempt (Python
+  server + prebuilt SQLite art fingerprints). Heavier and less accurate in-hand; superseded by
+  cloud vision. `main` is the only remote branch.
 
 ## Verification (no test suite)
 1. **No dead refs:** `grep -nE "settings|workerUrl|appToken|saveSettings" index.html app.js` → none.
