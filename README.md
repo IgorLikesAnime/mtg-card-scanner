@@ -80,6 +80,12 @@ Contributions are welcome! A few things that keep this project simple:
 
 See `CLAUDE.md` for the architecture details, exact commands, and known quirks.
 
+## Support
+
+If this saved you some tedious cataloguing, you can buy me a coffee ☕
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/igorlikesanime)
+
 ## Credits
 
 Card data and images from **[Scryfall](https://scryfall.com)**. Magic: The Gathering is a
