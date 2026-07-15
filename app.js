@@ -276,6 +276,7 @@ $("addBtn").addEventListener("click", () => {
 });
 
 function renderList() {
+  hideSetTip();
   const tbody = $("tbody");
   $("count").textContent = collected.reduce((n, e) => n + e.qty, 0);
   if (collected.length === 0) {
@@ -293,7 +294,7 @@ function renderList() {
       `<td class="thumb">${e.card.img ? `<img src="${escapeHtml(e.card.img)}" alt="" loading="lazy" />` : ""}</td>` +
       `<td class="num">${e.qty}</td>` +
       `<td>${escapeHtml(e.card.name)}</td>` +
-      `<td class="setcell">${(e.card.set || "").toUpperCase()} #${escapeHtml(e.card.collector_number)}</td>` +
+      `<td class="setcell"><span class="settag" tabindex="0" data-setname="${escapeHtml(e.card.set_name || "")}" aria-label="Set: ${escapeHtml(e.card.set_name || (e.card.set || "").toUpperCase())}">${(e.card.set || "").toUpperCase()} #${escapeHtml(e.card.collector_number)}</span></td>` +
       `<td>${(e.card.lang || "en").toUpperCase()}</td>` +
       `<td>${e.foil ? "✨" : ""}</td>`;
     const td = document.createElement("td");
@@ -308,6 +309,40 @@ function renderList() {
 
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- set-name tooltip (hover on desktop, tap/focus on mobile) ----------
+// One floating bubble appended to <body> so it escapes the list's overflow clipping;
+// its position is computed from the trigger's rect each time it's shown.
+let setTipEl = null;
+function hideSetTip() { if (setTipEl) setTipEl.classList.remove("show"); }
+function showSetTip(tag) {
+  const name = tag.dataset.setname;
+  if (!name) return;
+  if (!setTipEl) {
+    setTipEl = document.createElement("div");
+    setTipEl.className = "settip";
+    document.body.appendChild(setTipEl);
+  }
+  setTipEl.textContent = name;
+  setTipEl.classList.add("show");
+  const r = tag.getBoundingClientRect();
+  const tw = setTipEl.offsetWidth, th = setTipEl.offsetHeight;
+  let left = Math.max(6, Math.min(r.left + r.width / 2 - tw / 2, window.innerWidth - tw - 6));
+  let top = r.top - th - 8;
+  if (top < 6) top = r.bottom + 8;   // flip below if there's no room above
+  setTipEl.style.left = Math.round(left) + "px";
+  setTipEl.style.top = Math.round(top) + "px";
+}
+(function wireSetTip() {
+  const tb = $("tbody");
+  tb.addEventListener("mouseover", (e) => { const t = e.target.closest(".settag"); if (t) showSetTip(t); });
+  tb.addEventListener("mouseout", (e) => { if (e.target.closest(".settag")) hideSetTip(); });
+  tb.addEventListener("focusin", (e) => { const t = e.target.closest(".settag"); if (t) showSetTip(t); });
+  tb.addEventListener("focusout", hideSetTip);
+  tb.addEventListener("click", (e) => { const t = e.target.closest(".settag"); if (t) { e.stopPropagation(); showSetTip(t); } });
+  document.addEventListener("click", hideSetTip);
+  window.addEventListener("scroll", hideSetTip, true);
+})();
 
 // ---------- exports (carried over unchanged) ----------
 document.querySelectorAll(".exports button").forEach((b) =>
