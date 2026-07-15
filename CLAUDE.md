@@ -5,14 +5,15 @@ Guidance for future Claude sessions on this repo. Read this first.
 ## 🧭 Handoff (2026-07-14)
 
 **State:** the cloud-vision app is **deployed and live** as a **public tool (Mode B)** — anyone
-can scan, no setup. Branch `cloud-vision-gemini`. `main` (original set-lock app) and
-`rebuild-selfhosted` (complete offline package, commit `b3bb8a5`) are intact.
+can scan, no setup. **`main` is now the product** (the cloud-vision app was consolidated onto
+`main`; the original perceptual-hash app is preserved in git history and on branch
+`cloud-vision-gemini`). GitHub Pages serves `main`/root and the repo is **public**.
 
 **Live:**
 - App (GitHub Pages): <https://igorlikesanime.github.io/mtg-card-scanner/>
 - Worker: `https://mtgcardscanner.amirmag1851.workers.dev`  (health: `/health` → `{ok:true}`)
-- Model: `gemini-flash-latest` (Google retired 2.0 and, for new keys, 2.5 — use the `-latest`
-  alias to auto-roll forward). `GEMINI_MODEL` var overrides it.
+- Model: `gemini-flash-lite-latest` (fast/cheap, less 503 overload; Google retired 2.0 and, for
+  new keys, 2.5 — use `-latest` aliases to auto-roll forward). Set via the `GEMINI_MODEL` var.
 
 **Verified:** Worker control flow (CORS/OPTIONS, token→401, bad origin→403, size guard) and the
 **real Gemini path end-to-end** via live curl — the model resolves and only rejects non-image
@@ -28,8 +29,38 @@ bytes (400), i.e. a real photo works. Scryfall resolution against the live API.
 - **The Gemini API key was never exposed** — it lives only as a Cloudflare Worker secret; repo +
   full git history scanned clean.
 
-**Open items:** confirm the `RATE_LIMITER` binding is actually added on the Worker (dashboard →
-Settings → Bindings). Consider bring-your-own-key if cost/abuse ever becomes a problem.
+**Status (2026-07-14, later):** rate limiter **confirmed working** — `/identify` returns `429`
+past the per-IP limit (`RATE_LIMITER` binding live, namespace `1001`, 15/60s); `/health` now also
+returns `{"ok":true,"ratelimit":true}`. User is on Gemini **prepay** (credit balance = the hard
+cost cap). Cost protection = prepay balance + per-IP rate limit.
+
+## ✅ Done (2026-07-14) — UI refresh + Advanced section removed
+Executed the deferred frontend plan (`~/.claude/plans/create-a-plan-to-crystalline-haven.md`).
+Frontend only — `index.html` + `app.js`; worker/exports untouched.
+- **Advanced/Settings removed:** deleted the `<details id="settings">` panel and all its JS wiring.
+  `getWorkerUrl()`/`getToken()` now return plain constants `WORKER_URL`/`APP_TOKEN` (the
+  `localStorage` override is **gone** — no per-user config path anymore). Grep for `settings`,
+  `workerUrl`, `appToken`, `saveSettings`, `mtg_worker_url` etc. → zero refs.
+- **UI redesign (revised after user feedback):** first pass used a neon-cyan "HUD" look; the user
+  flagged it as reading AI-generated ("neon is a giveaway"). Final design is calm + near-monochrome:
+  warm charcoal (`--bg #17181b`) with a **single muted brass accent** (`--accent #c2a063`, grounded
+  in MTG gold borders) used only on primary actions (Capture/Add) + focus. No glows, gradients, or
+  neon. Card guide is thin neutral-white corner brackets (plain camera-viewfinder look). **CSS is
+  mobile-first** (base = phone: single column, full-width 52px buttons, 16px inputs to stop iOS
+  zoom; desktop two-panel layered on at `min-width:861px`). Scanned-list table wrapped in
+  `.twrap` (`overflow-x:auto`) so it can't blow out narrow phones.
+- **Loading indicator:** a `body.scanning` class (added on capture, cleared in `identify()`'s
+  `finally`) drives a reticle scan-line sweep **and** a status spinner; Capture is disabled
+  mid-scan. Respects `prefers-reduced-motion`.
+- **DOM contract preserved:** all IDs/classes the JS selects are intact; `.cardbox` stays nested
+  in `.stage` with its `height:88%; aspect-ratio:63/88` geometry **unchanged** (crop math depends
+  on it).
+- **Shipped:** committed `index.html`+`app.js`+`CLAUDE.md` to `main` and pushed (2026-07-14);
+  GitHub Pages rebuilds in ~1 min. UI reviewed locally by the user and approved.
+- **Still worth a real device pass:** localhost can't exercise the identify path (Worker origin
+  gate only trusts the Pages origin), so the **crop geometry + identify→add→export flow** should
+  be confirmed once on the live URL / a phone camera. Nothing indicates a problem — just untested
+  on-device.
 
 ### ▶️ Deploy recap (how it was set up)
 1. **Gemini key** at <https://aistudio.google.com/apikey> (budget cap set).

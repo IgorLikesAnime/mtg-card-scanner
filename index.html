@@ -3,139 +3,233 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#17181b" />
   <title>MTG Card Scanner</title>
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --bg: #17181b;
+      --panel: #202227;
+      --panel-2: #1b1d21;
+      --line: #2b2d33;
+      --line-2: #383b42;
+      --text: #ededee;
+      --muted: #9a9ba2;
+      --faint: #6b6d74;
+      --accent: #c2a063;        /* muted brass — the single accent */
+      --accent-ink: #201808;
+      --accent-soft: rgba(194, 160, 99, .13);
+      --danger: #d98a86;
+      --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --r: 12px;
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-           background: #0f1115; color: #e6e8ee; line-height: 1.45; }
-    header { padding: 14px 18px; border-bottom: 1px solid #232838; }
-    header h1 { margin: 0; font-size: 18px; }
-    header p { margin: 4px 0 0; font-size: 13px; color: #9aa2b5; }
-    main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px; max-width: 1200px; }
-    @media (max-width: 860px) { main { grid-template-columns: 1fr; } .stage { aspect-ratio: 3/4; } }
-    .card { background: #161a24; border: 1px solid #232838; border-radius: 10px; padding: 14px; }
-    .card h2 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: #9aa2b5; }
-    button { background: #3b5bdb; color: #fff; border: 0; border-radius: 7px; padding: 9px 14px;
-             font-size: 14px; cursor: pointer; font-weight: 600; }
-    button.secondary { background: #2a2f3d; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    button:hover:not(:disabled) { filter: brightness(1.08); }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    input[type=text], input[type=password], input[type=number], select {
-      background: #0f1115; border: 1px solid #2a2f3d; color: #e6e8ee; border-radius: 6px;
-      padding: 8px 10px; font-size: 14px; }
-    input[type=number] { width: 64px; }
-    label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
-    label.fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #9aa2b5; flex: 1; min-width: 140px; }
-    /* Settings */
-    details.settings { margin-top: 10px; border: 1px solid #232838; border-radius: 8px; padding: 8px 12px; }
-    details.settings summary { cursor: pointer; font-size: 13px; color: #9aa2b5; }
-    .warn { color: #f8b4b4; font-size: 13px; }
-    /* Camera + card guide */
-    .stage { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; font-family: var(--font-ui);
+      background: var(--bg); color: var(--text); line-height: 1.5;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------- top bar ---------- */
+    .topbar { padding: 16px 16px 14px; border-bottom: 1px solid var(--line); }
+    .brand { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+    .tagline { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+
+    /* ---------- layout (mobile-first: single column) ---------- */
+    main { display: block; padding: 14px; max-width: 720px; margin: 0 auto; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px; margin-bottom: 14px;
+    }
+    .panel:last-child { margin-bottom: 0; }
+    .panel-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+      margin: 0 0 14px; font-size: 15px; font-weight: 650;
+    }
+    .panel-head .count { font-family: var(--font-mono); font-size: 14px; color: var(--muted); font-weight: 500; }
+
+    /* ---------- buttons ---------- */
+    button {
+      font-family: inherit; font-size: 16px; font-weight: 600; cursor: pointer;
+      border: 1px solid transparent; border-radius: 10px; padding: 14px 16px;
+      color: var(--text); background: #2a2d34;
+      transition: background .12s ease, border-color .12s ease, color .12s ease;
+    }
+    button:hover:not(:disabled) { background: #31343c; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    button.primary:hover:not(:disabled) { background: #cdac6f; }
+    button.ghost { background: transparent; border-color: var(--line-2); }
+    button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .03); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ---------- camera stage + guide ---------- */
+    .stage {
+      position: relative; width: 100%; aspect-ratio: 3/4; background: #000;
+      border-radius: 10px; overflow: hidden; border: 1px solid var(--line-2);
+    }
     video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .overlay { position: absolute; inset: 0; pointer-events: none; }
-    /* portrait Magic card = 63:88 ≈ 0.716 */
-    .cardbox { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-               height: 88%; aspect-ratio: 63/88; border: 2px solid #4dd4ff; border-radius: 10px;
-               background: rgba(77,212,255,.05); }
-    .hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 12px;
-            color: #4dd4ff; text-shadow: 0 1px 2px #000; padding: 0 8px; }
-    #status { font-size: 13px; color: #9aa2b5; min-height: 18px; margin-top: 8px; }
-    /* Candidate */
-    #candidate { display: none; gap: 12px; margin-top: 12px; }
-    #candidate img { width: 104px; border-radius: 6px; background: #000; }
+    /* portrait Magic card = 63:88 — geometry the capture crop math depends on; do not alter */
+    .cardbox {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      height: 86%; aspect-ratio: 63/88;
+      border: 1px solid rgba(255, 255, 255, .28); border-radius: 6px;
+    }
+    .corner { position: absolute; width: 22px; height: 22px; border: 2px solid rgba(255, 255, 255, .8); }
+    .corner.tl { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 6px; }
+    .corner.tr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; border-top-right-radius: 6px; }
+    .corner.bl { bottom: -1px; left: -1px; border-right: 0; border-top: 0; border-bottom-left-radius: 6px; }
+    .corner.br { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 6px; }
+    .scanline {
+      position: absolute; left: 0; right: 0; top: 0; height: 1px; opacity: 0;
+      background: rgba(255, 255, 255, .75);
+    }
+    .hint {
+      position: absolute; left: 0; right: 0; bottom: 8px; text-align: center;
+      font-size: 12.5px; color: rgba(255, 255, 255, .82); text-shadow: 0 1px 3px #000; padding: 0 12px;
+    }
+    body.scanning .scanline { animation: sweep 1.3s ease-in-out infinite; }
+    @keyframes sweep { 0% { top: 4%; opacity: 0; } 20% { opacity: .9; } 80% { opacity: .9; } 100% { top: 96%; opacity: 0; } }
+
+    /* ---------- actions + status ---------- */
+    .scan-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+    .statusbar { display: flex; align-items: center; gap: 9px; min-height: 20px; margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+    .spinner {
+      display: none; width: 15px; height: 15px; flex: none; border-radius: 50%;
+      border: 2px solid var(--line-2); border-top-color: var(--accent); animation: spin .7s linear infinite;
+    }
+    body.scanning .spinner { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #capPreview { margin-top: 12px; width: 100%; max-width: 180px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; }
+
+    /* ---------- candidate result ---------- */
+    #candidate { display: none; gap: 14px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+    #candImg { width: 96px; flex: none; border-radius: 8px; background: #000; }
     #candidate .meta { flex: 1; min-width: 0; }
-    #candidate .meta .name { font-weight: 700; font-size: 15px; }
-    #candidate .meta .sub { color: #9aa2b5; font-size: 13px; }
-    .read { font-size: 12px; color: #6b7280; margin-top: 4px; }
-    /* List */
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #232838; }
-    th { color: #9aa2b5; font-weight: 600; }
-    td.num, th.num { text-align: right; }
-    .remove { background: #442; color: #f8b4b4; padding: 3px 8px; font-size: 12px; }
-    .empty { color: #6b7280; font-size: 13px; padding: 8px 0; }
-    .exports { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .exports button { background: #2f9e44; }
+    #candName { font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+    #candSub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+    #candRead { font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); margin-top: 6px; word-break: break-word; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    input[type=text], input[type=number], select {
+      background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
+      border-radius: 9px; padding: 11px 12px; font-size: 16px; font-family: inherit; min-height: 46px;
+    }
+    input[type=number] { width: 72px; }
+    .fld { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); flex: 1; min-width: 140px; }
+    .chk { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); }
+    .chk input[type=checkbox] { width: 21px; height: 21px; accent-color: var(--accent); }
+    .chk:has(#foilChk:checked) { color: var(--accent); }
+
+    /* ---------- collected list ---------- */
+    .twrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    td.num, th.num { text-align: right; font-family: var(--font-mono); width: 34px; }
+    td:nth-child(2) { white-space: normal; }
+    .setcell { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+    tbody tr:last-child td { border-bottom: 0; }
+    .remove { background: transparent; border: 0; color: var(--faint); padding: 6px 8px; font-size: 16px; line-height: 1; min-height: 0; }
+    .remove:hover:not(:disabled) { background: transparent; color: var(--danger); }
+    .empty {
+      color: var(--faint); font-size: 14px; padding: 30px 14px; text-align: center;
+      border: 1px dashed var(--line-2); border-radius: 12px;
+    }
+    .empty b { color: var(--muted); font-weight: 600; }
+
+    .exports { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    .exports button { background: transparent; border: 1px solid var(--line-2); font-size: 13px; font-weight: 600; padding: 10px 13px; }
+    .exports button:hover:not(:disabled) { background: transparent; border-color: var(--accent); color: var(--accent); }
     a.dl { display: none; }
-    code { background: #0f1115; padding: 1px 5px; border-radius: 4px; }
+    .note { font-size: 12.5px; color: var(--faint); margin: 14px 0 0; line-height: 1.5; }
+    code { font-family: var(--font-mono); background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-size: .92em; }
+
+    /* ---------- desktop ---------- */
+    @media (min-width: 861px) {
+      main { max-width: 1120px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; padding: 22px; align-items: start; }
+      .panel { margin-bottom: 0; }
+      .stage { aspect-ratio: 4/3; }
+      .scan-actions { flex-direction: row; }
+      .scan-actions button { flex: 1; }
+      button { padding: 11px 16px; font-size: 15px; }
+      .exports button { padding: 9px 13px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      body.scanning .scanline { animation: none; opacity: .8; top: 50%; }
+      .spinner { animation: none; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>🃏 MTG Card Scanner</h1>
-    <p>Point your camera at a card and Capture. A vision model reads the name and the bottom-left collector number to identify the <b>exact printing</b> — any set, any language.</p>
+  <header class="topbar">
+    <h1 class="brand">MTG Card Scanner</h1>
+    <p class="tagline">Scan a card, confirm the printing, export your list.</p>
   </header>
 
   <main>
-    <!-- LEFT: camera + recognition -->
-    <section class="card">
-      <h2>Scan</h2>
+    <!-- camera + recognition -->
+    <section class="panel">
+      <div class="panel-head"><span>Scan</span></div>
 
       <div class="stage">
         <video id="video" playsinline muted></video>
         <div class="overlay">
-          <div class="cardbox"></div>
-          <div class="hint" id="hint">Fit the WHOLE card inside the box, then Capture</div>
+          <div class="cardbox">
+            <span class="corner tl"></span>
+            <span class="corner tr"></span>
+            <span class="corner bl"></span>
+            <span class="corner br"></span>
+            <span class="scanline" aria-hidden="true"></span>
+          </div>
+          <div class="hint" id="hint">Fit the whole card inside the frame</div>
         </div>
       </div>
-      <div class="row" style="margin-top:10px">
-        <button id="startBtn">Start camera</button>
-        <button id="captureBtn" class="secondary" disabled>📸 Capture &amp; identify</button>
-      </div>
-      <div id="status">Start the camera to begin.</div>
-      <canvas id="capPreview" title="Captured card" style="display:none; margin-top:8px; width:100%; max-width:200px; border:1px solid #2a2f3d; border-radius:6px; background:#000;"></canvas>
 
-      <details class="settings" id="settings">
-        <summary>⚙️ Advanced — use your own scanner (optional)</summary>
-        <p style="font-size:12px;color:#9aa2b5;margin:10px 0 0">
-          Nothing to fill in to scan — the app works as-is. If you run your own Cloudflare
-          Worker (see the project README), point the app at it here. Saved in this browser only.
-        </p>
-        <div class="row" style="margin-top:10px">
-          <label class="fld">Worker URL
-            <input type="text" id="workerUrl" placeholder="https://your-worker.you.workers.dev" />
-          </label>
-          <label class="fld">App token
-            <input type="password" id="appToken" placeholder="your Worker's APP_TOKEN" />
-          </label>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="saveSettings" class="secondary">Save</button>
-          <span id="settingsMsg" style="font-size:12px;color:#9aa2b5"></span>
-        </div>
-      </details>
+      <div class="scan-actions">
+        <button id="captureBtn" class="primary" disabled>Capture &amp; identify</button>
+        <button id="startBtn" class="ghost">Start camera</button>
+      </div>
+
+      <div class="statusbar">
+        <span class="spinner" id="spinner" aria-hidden="true"></span>
+        <span id="status">Start the camera to begin.</span>
+      </div>
+      <canvas id="capPreview" title="Captured card" style="display:none"></canvas>
 
       <!-- result -->
       <div id="candidate">
         <img id="candImg" alt="" />
         <div class="meta">
-          <div class="name" id="candName">—</div>
-          <div class="sub" id="candSub">—</div>
-          <div class="read" id="candRead"></div>
+          <div id="candName">—</div>
+          <div id="candSub">—</div>
+          <div id="candRead"></div>
 
           <!-- correction / manual resolve -->
-          <div class="row" style="margin-top:8px">
+          <div class="row" style="margin-top:12px">
             <input type="text" id="searchInput" placeholder="Wrong? Type the card name" style="flex:1" />
-            <button id="searchBtn" class="secondary">Search</button>
+            <button id="searchBtn" class="ghost">Search</button>
           </div>
-          <div id="suggestions" class="row" style="display:none; margin-top:8px"></div>
+          <div id="suggestions" class="row" style="display:none; margin-top:10px"></div>
 
           <!-- printing / language picker -->
-          <div class="row" style="margin-top:10px">
-            <label class="chk">Lang
+          <div class="row" style="margin-top:12px">
+            <label class="fld" style="flex:0 0 auto; min-width:88px">Language
               <select id="langSelect"><option value="">—</option></select>
             </label>
-            <label class="chk" style="flex:1; min-width:180px">Printing
-              <select id="printingSelect" style="flex:1"><option value="">—</option></select>
+            <label class="fld">Printing
+              <select id="printingSelect"><option value="">—</option></select>
             </label>
           </div>
-          <div class="row" style="margin-top:8px">
-            <label class="chk"><input type="checkbox" id="foilChk" /> Foil</label>
+          <div class="row" style="margin-top:12px">
+            <label class="chk"><input type="checkbox" id="foilChk" /> <span>Foil</span></label>
             <label class="chk">Qty <input type="number" id="qtyInput" value="1" min="1" /></label>
-            <button id="addBtn" disabled>➕ Add to list</button>
+            <button id="addBtn" class="primary" disabled style="margin-left:auto">Add to list</button>
           </div>
         </div>
       </div>
@@ -143,17 +237,19 @@
       <canvas id="frameCanvas" style="display:none"></canvas>
     </section>
 
-    <!-- RIGHT: collected list + export -->
-    <section class="card">
-      <h2>Scanned cards (<span id="count">0</span>)</h2>
+    <!-- collected list + export -->
+    <section class="panel">
+      <div class="panel-head"><span>Scanned cards</span><span class="count"><span id="count">0</span> total</span></div>
       <div id="listWrap">
-        <div class="empty" id="emptyMsg">No cards yet — scan one.</div>
-        <table id="table" style="display:none">
-          <thead>
-            <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Lang</th><th>Foil</th><th></th></tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
+        <div class="empty" id="emptyMsg">No cards yet — <b>scan one to start your list.</b></div>
+        <div class="twrap">
+          <table id="table" style="display:none">
+            <thead>
+              <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Lang</th><th>Foil</th><th></th></tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
       </div>
       <div class="exports">
         <button data-fmt="manabox">ManaBox CSV</button>
@@ -163,8 +259,8 @@
         <button data-fmt="scryfall">Scryfall JSON</button>
       </div>
       <a id="dl" class="dl"></a>
-      <p style="font-size:12px;color:#6b7280;margin:12px 0 0">
-        A vision model reads each card; the exact printing is resolved from <code>Scryfall</code>. Confirm the printing/language before adding, then export.
+      <p class="note">
+        A vision model reads each card; the exact printing is resolved from <code>Scryfall</code>. Confirm the printing and language before adding, then export.
       </p>
     </section>
   </main>

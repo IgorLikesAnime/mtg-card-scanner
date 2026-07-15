@@ -21,27 +21,14 @@ let collected = [];
 
 const setStatus = (m) => { $("status").textContent = m; };
 
-// ---------- settings (Worker URL + app token in localStorage) ----------
-function loadSettings() {
-  $("workerUrl").value = localStorage.getItem("mtg_worker_url") || "";
-  $("appToken").value = localStorage.getItem("mtg_app_token") || "";
-  if (!getWorkerUrl() || !getToken()) $("settings").open = true;
-}
-// Hosted public tool: the app ships with a default Worker + token so anyone can scan out of
+// ---------- config ----------
+// Hosted public tool: the Worker URL + app token ship with the app so anyone can scan out of
 // the box. The token is NOT a secret (it's public here by design and only gates the Worker,
-// which holds the real Gemini key server-side). Advanced users can override both in Settings,
-// which are stored per-browser and take precedence over these defaults.
-const DEFAULT_WORKER_URL = "https://mtgcardscanner.amirmag1851.workers.dev";
-const DEFAULT_APP_TOKEN = "0c415ef93e153b9959314db675a064e9";
-const getWorkerUrl = () => (localStorage.getItem("mtg_worker_url") || DEFAULT_WORKER_URL).replace(/\/+$/, "");
-const getToken = () => localStorage.getItem("mtg_app_token") || DEFAULT_APP_TOKEN;
-
-$("saveSettings").addEventListener("click", () => {
-  localStorage.setItem("mtg_worker_url", $("workerUrl").value.trim());
-  localStorage.setItem("mtg_app_token", $("appToken").value.trim());
-  $("settingsMsg").textContent = "Saved.";
-  setTimeout(() => ($("settingsMsg").textContent = ""), 1500);
-});
+// which holds the real Gemini key server-side).
+const WORKER_URL = "https://mtgcardscanner.amirmag1851.workers.dev";
+const APP_TOKEN = "0c415ef93e153b9959314db675a064e9";
+const getWorkerUrl = () => WORKER_URL.replace(/\/+$/, "");
+const getToken = () => APP_TOKEN;
 
 // ---------- camera ----------
 $("startBtn").addEventListener("click", async () => {
@@ -64,11 +51,6 @@ $("startBtn").addEventListener("click", async () => {
 
 // ---------- capture -> Worker /identify ----------
 $("captureBtn").addEventListener("click", () => {
-  if (!getWorkerUrl() || !getToken()) {
-    $("settings").open = true;
-    setStatus("Set your Worker URL and app token in Settings first.");
-    return;
-  }
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) { setStatus("Camera not ready."); return; }
 
@@ -100,6 +82,8 @@ $("captureBtn").addEventListener("click", () => {
   prev.style.display = "block";
 
   setStatus("Identifying…");
+  document.body.classList.add("scanning");
+  $("captureBtn").disabled = true;
   cropCanvas.toBlob((blob) => identify(blob), "image/jpeg", 0.8);
 });
 
@@ -114,7 +98,10 @@ async function identify(blob) {
     if (!r.ok || j.error) { setStatus("Identify failed: " + (j.error || r.status)); return; }
     await handleRead(j);
   } catch (e) {
-    setStatus("Couldn't reach the Worker: " + e.message + " (check the URL in Settings)");
+    setStatus("Couldn't reach the scanner service: " + e.message + " (check your connection).");
+  } finally {
+    document.body.classList.remove("scanning");
+    $("captureBtn").disabled = false;
   }
 }
 
@@ -305,7 +292,7 @@ function renderList() {
     tr.innerHTML =
       `<td class="num">${e.qty}</td>` +
       `<td>${escapeHtml(e.card.name)}</td>` +
-      `<td>${(e.card.set || "").toUpperCase()} #${escapeHtml(e.card.collector_number)}</td>` +
+      `<td class="setcell">${(e.card.set || "").toUpperCase()} #${escapeHtml(e.card.collector_number)}</td>` +
       `<td>${(e.card.lang || "en").toUpperCase()}</td>` +
       `<td>${e.foil ? "✨" : ""}</td>`;
     const td = document.createElement("td");
@@ -375,5 +362,4 @@ function exportAs(fmt) {
 }
 
 // ---------- init ----------
-loadSettings();
 renderList();
