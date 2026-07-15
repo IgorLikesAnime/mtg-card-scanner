@@ -264,7 +264,7 @@ $("addBtn").addEventListener("click", () => {
   const qty = Math.max(1, parseInt($("qtyInput").value, 10) || 1);
   const c = { id: currentCard.id, name: currentCard.name, set: currentCard.set,
     set_name: currentCard.set_name, collector_number: currentCard.collector_number,
-    rarity: currentCard.rarity, lang: currentCard.lang || "en" };
+    rarity: currentCard.rarity, lang: currentCard.lang || "en", img: cardImg(currentCard) };
   const ex = collected.find((e) => e.card.id === c.id && e.foil === foil);
   if (ex) ex.qty += qty;
   else collected.push({ qty, foil, card: c });
@@ -290,6 +290,7 @@ function renderList() {
   collected.forEach((e, i) => {
     const tr = document.createElement("tr");
     tr.innerHTML =
+      `<td class="thumb">${e.card.img ? `<img src="${escapeHtml(e.card.img)}" alt="" loading="lazy" />` : ""}</td>` +
       `<td class="num">${e.qty}</td>` +
       `<td>${escapeHtml(e.card.name)}</td>` +
       `<td class="setcell">${(e.card.set || "").toUpperCase()} #${escapeHtml(e.card.collector_number)}</td>` +

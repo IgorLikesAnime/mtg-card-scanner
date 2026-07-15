@@ -107,8 +107,8 @@
     #capPreview { margin-top: 12px; width: 100%; max-width: 180px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; }
 
     /* ---------- candidate result ---------- */
-    #candidate { display: none; gap: 14px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
-    #candImg { width: 96px; flex: none; border-radius: 8px; background: #000; }
+    #candidate { display: none; gap: 14px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); align-items: flex-start; }
+    #candImg { width: 96px; height: auto; aspect-ratio: 63 / 88; object-fit: cover; flex: none; align-self: flex-start; border-radius: 8px; background: #000; }
     #candidate .meta { flex: 1; min-width: 0; }
     #candName { font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
     #candSub { color: var(--muted); font-size: 13px; margin-top: 3px; }
@@ -131,7 +131,9 @@
     th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
     th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
     td.num, th.num { text-align: right; font-family: var(--font-mono); width: 34px; }
-    td:nth-child(2) { white-space: normal; }
+    td:nth-child(3) { white-space: normal; }
+    .thumb { width: 40px; padding: 7px 4px 7px 8px; }
+    .thumb img { width: 40px; height: auto; aspect-ratio: 63 / 88; object-fit: cover; border-radius: 4px; display: block; background: #000; }
     .setcell { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
     tbody tr:last-child td { border-bottom: 0; }
     .remove { background: transparent; border: 0; color: var(--faint); padding: 6px 8px; font-size: 16px; line-height: 1; min-height: 0; }
@@ -245,7 +247,7 @@
         <div class="twrap">
           <table id="table" style="display:none">
             <thead>
-              <tr><th class="num">#</th><th>Name</th><th>Set</th><th>Lang</th><th>Foil</th><th></th></tr>
+              <tr><th></th><th class="num">#</th><th>Name</th><th>Set</th><th>Lang</th><th>Foil</th><th></th></tr>
             </thead>
             <tbody id="tbody"></tbody>
           </table>
