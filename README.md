@@ -6,6 +6,8 @@ builds a list, and exports it to ManaBox, Moxfield, Archidekt, Deckbox, or Scryf
 
 No install, no sign-up, no API key. It runs in your phone's browser.
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/igorlikesanime)
+
 ## Why it's accurate
 
 Instead of fragile artwork matching, a **vision model reads the card** — its name and the
@@ -79,12 +81,6 @@ Contributions are welcome! A few things that keep this project simple:
   people rely on them importing cleanly.
 
 See `CLAUDE.md` for the architecture details, exact commands, and known quirks.
-
-## Support
-
-If this saved you some tedious cataloguing, you can buy me a coffee ☕
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/igorlikesanime)
 
 ## Credits
 
